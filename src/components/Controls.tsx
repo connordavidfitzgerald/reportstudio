@@ -8,6 +8,7 @@ import { PAGE_FORMATS, type FormatId } from '../config/formats'
 import type { BgRole, ImageElement, PageElement, TextElement, TextVariant } from '../doc/types'
 import { buildTemplate, templatesFor } from '../templates'
 import { useCurrentPage, useDeck } from '../store/useDeck'
+import { OutlinePanel } from './OutlinePanel'
 import { deckPages } from '../doc/sections'
 import { useRenderAssets } from '../hooks/useRenderAssets'
 import { ToolToggle } from './ToolToggle'
@@ -96,6 +97,8 @@ export function Controls() {
             options={PAGE_FORMATS.map((f) => ({ value: f.id, label: f.label }))}
           />
         </Section>
+
+        <OutlinePanel />
 
         <Section title="Template" collapsible defaultOpen>
           <div className="grid grid-cols-2 gap-2 px-1">

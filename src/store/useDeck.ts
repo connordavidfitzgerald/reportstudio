@@ -1,10 +1,18 @@
 import { create } from 'zustand'
 import { pruneImageBlobs } from '../core/imageStore'
 import { collectBlobIds } from '../doc/imageCache'
-import { createDeck, createSection, pageId } from '../doc/defaults'
+import { createDeck, createFlowSection, createSection, pageId } from '../doc/defaults'
+import type { Block } from '../doc/blocks'
 import type { Box, Deck, PageElement } from '../doc/types'
 import type { RenderPage } from '../render/page'
-import { deckPages, isStatic, type Section, type StaticSection } from '../doc/sections'
+import {
+  deckPages,
+  isFlow,
+  isStatic,
+  type FlowSection,
+  type Section,
+  type StaticSection,
+} from '../doc/sections'
 import type { FormatId } from '../config/formats'
 import { getFormat } from '../config/formats'
 import { grid } from '../render/grid'
@@ -99,6 +107,17 @@ interface DeckStore {
   duplicateElements: (pageId: string, ids: string[]) => void
   reorderElement: (pageId: string, id: string, to: 'front' | 'back' | 'up' | 'down') => void
 
+  // Sections
+  /** Append a flow section, and open its first page. */
+  addFlowSection: (title?: string) => void
+  /** Replace a flow section's stream — the import path. */
+  setBlocks: (sectionId: string, blocks: Block[], tag?: string) => void
+  /** Edit one block in place. Coalesced per block, so typing is one undo step. */
+  setBlock: (sectionId: string, blockId: string, patch: Partial<Block>) => void
+  removeBlock: (sectionId: string, blockId: string) => void
+  /** Move a block within its stream — the reorder gesture. */
+  moveBlock: (sectionId: string, blockId: string, delta: number) => void
+
   // Pages
   addPage: (at?: number, elements?: PageElement[], templateId?: string) => void
   /** Drop a template's elements onto the page that's already open. */
@@ -136,6 +155,14 @@ function mapSection(
     // no `Box` to change — editing one means editing its block — so a stray call
     // is a no-op rather than a corrupt document.
     sections: deck.sections.map((s) => (s.id === id && isStatic(s) ? fn(s) : s)),
+  }
+}
+
+/** The flow-section counterpart of {@link mapSection}. */
+function mapFlow(deck: Deck, id: string, fn: (s: FlowSection) => FlowSection): Deck {
+  return {
+    ...deck,
+    sections: deck.sections.map((s) => (s.id === id && isFlow(s) ? fn(s) : s)),
   }
 }
 
@@ -290,6 +317,67 @@ export const useDeck = create<DeckStore>((set, get) => ({
               : Math.max(0, from - 1)
             next.splice(target, 0, el)
             return { ...p, elements: next }
+          }),
+        ),
+      })),
+    ),
+
+  addFlowSection: (title) =>
+    tagged('section:add', () =>
+      set((s) => {
+        const section = createFlowSection(title)
+        const sections = [...s.deck.sections, section]
+        const deck = deepFreeze({ ...s.deck, sections })
+        return { deck, currentPageId: deckPages(deck)[0].id, selectedIds: [] }
+      }),
+    ),
+
+  setBlocks: (sectionId, blocks, tag = 'section:blocks') =>
+    tagged(tag, () =>
+      set((s) => ({
+        deck: deepFreeze(mapFlow(s.deck, sectionId, (sec) => ({ ...sec, blocks }))),
+        selectedIds: [],
+      })),
+    ),
+
+  setBlock: (sectionId, id, patch) =>
+    // Tagged per block so a typed sentence collapses into one undo step, the
+    // same way editing one element's text does.
+    tagged(`block:${id}`, () =>
+      set((s) => ({
+        deck: deepFreeze(
+          mapFlow(s.deck, sectionId, (sec) => ({
+            ...sec,
+            blocks: sec.blocks.map((b) => (b.id === id ? ({ ...b, ...patch } as Block) : b)),
+          })),
+        ),
+      })),
+    ),
+
+  removeBlock: (sectionId, id) =>
+    tagged('block:remove', () =>
+      set((s) => ({
+        deck: deepFreeze(
+          mapFlow(s.deck, sectionId, (sec) => ({
+            ...sec,
+            blocks: sec.blocks.filter((b) => b.id !== id),
+          })),
+        ),
+      })),
+    ),
+
+  moveBlock: (sectionId, id, delta) =>
+    tagged('block:move', () =>
+      set((s) => ({
+        deck: deepFreeze(
+          mapFlow(s.deck, sectionId, (sec) => {
+            const from = sec.blocks.findIndex((b) => b.id === id)
+            const to = from + delta
+            if (from < 0 || to < 0 || to >= sec.blocks.length) return sec
+            const blocks = sec.blocks.slice()
+            const [moved] = blocks.splice(from, 1)
+            blocks.splice(to, 0, moved)
+            return { ...sec, blocks }
           }),
         ),
       })),
