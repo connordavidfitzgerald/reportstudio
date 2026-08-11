@@ -156,4 +156,32 @@ assert.deepEqual(kinds('Just one line.'), ['para'])
   assert.equal(sections[0].blocks[0].text, 'Front matter.')
 }
 
-console.log('import ok — structure, indents, breaks, inline markup, and no text lost')
+
+// -- localized text ----------------------------------------------------------
+{
+  const { t, setLang, isFullyTranslated } = await import('../src/doc/localized.ts')
+
+  // A plain string serves both editions — the common case, and why a
+  // monolingual document carries no translation machinery.
+  assert.equal(t('Shared', 'en'), 'Shared')
+  assert.equal(t('Shared', 'fr'), 'Shared')
+  assert.ok(isFullyTranslated('Shared'))
+
+  const pair = setLang('Findings', 'fr', 'Constatations')
+  assert.deepEqual(pair, { en: 'Findings', fr: 'Constatations' })
+  assert.equal(t(pair, 'fr'), 'Constatations')
+  assert.ok(isFullyTranslated(pair))
+
+  // A missing translation falls back to the other language rather than to empty:
+  // an untranslated paragraph is obvious and fixable, a vanished one is neither.
+  assert.equal(t({ en: 'Only English' }, 'fr'), 'Only English')
+  assert.ok(!isFullyTranslated({ en: 'Only English' }))
+  assert.equal(t(undefined, 'en'), '')
+  assert.equal(t({}, 'en'), '')
+
+  // Setting both to the same text collapses back to a plain string, so documents
+  // don't accumulate redundant pairs.
+  assert.equal(setLang({ en: 'A', fr: 'B' }, 'fr', 'A'), 'A')
+}
+
+console.log('import ok — structure, indents, breaks, inline markup, and no text lost, localization')

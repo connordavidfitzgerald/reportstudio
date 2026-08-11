@@ -9,6 +9,7 @@ import type { BgRole, ImageElement, PageElement, TextElement, TextVariant } from
 import { buildTemplate, templatesFor } from '../templates'
 import { useCurrentPage, useDeck } from '../store/useDeck'
 import { OutlinePanel } from './OutlinePanel'
+import { LANGS, type Lang } from '../doc/localized'
 import { deckPages } from '../doc/sections'
 import { useRenderAssets } from '../hooks/useRenderAssets'
 import { ToolToggle } from './ToolToggle'
@@ -52,15 +53,27 @@ export function Controls() {
     )
   }
 
-  const exportPdf = async (scale: 1 | 2) => {
+  /**
+   * Export one PDF per language, from the same layout.
+   *
+   * Each edition is typeset independently rather than sharing a page plan:
+   * French runs perhaps 15% longer than English, so forcing both into the same
+   * pagination would either overset one or loosen the other. Two documents from
+   * one source is the honest output.
+   */
+  const exportPdf = async (scale: 1 | 2, langs: Lang[] = [deck.lang]) => {
     setBusy('Preparing…')
     try {
       const { exportDeckPdf, download } = await exporter()
-      const blob = await exportDeckPdf(deck, assets, {
-        scale,
-        onProgress: (done, total) => setBusy(`Page ${done} / ${total}`),
-      })
-      download(blob, `lehub-${deck.format}.pdf`)
+      for (const lang of langs) {
+        const edition = langs.length > 1 ? { ...deck, lang } : deck
+        const blob = await exportDeckPdf(edition, assets, {
+          scale,
+          onProgress: (done, total) =>
+            setBusy(langs.length > 1 ? `${lang.toUpperCase()} ${done} / ${total}` : `Page ${done} / ${total}`),
+        })
+        download(blob, `lehub-${deck.format}-${lang}.pdf`)
+      }
     } catch (err) {
       console.error(err)
       alert(`Export failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -204,6 +217,15 @@ export function Controls() {
             PNG
           </button>
         </div>
+        <button
+          className="border border-black px-2 py-1 text-xs hover:bg-black hover:text-white disabled:opacity-40"
+          disabled={!!busy}
+          onClick={() => exportPdf(2, LANGS)}
+          title="One PDF per language, each typeset independently"
+        >
+          PDF EN + FR
+        </button>
+
         {busy && <span className="px-1 font-mono text-xs uppercase">{busy}</span>}
       </footer>
     </div>
