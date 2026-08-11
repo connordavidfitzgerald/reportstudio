@@ -4,6 +4,7 @@ import { loadFonts } from '../core/config/fonts'
 import { getFormat } from '../config/formats'
 import { collectImageRefs, imagesReady } from '../doc/imageCache'
 import type { Deck } from '../doc/types'
+import { deckPages } from '../doc/sections'
 import type { RenderAssets } from '../render/env'
 import { renderPage } from '../render/renderPage'
 
@@ -63,8 +64,10 @@ export async function exportDeckPdf(
   const ctx = canvas.getContext('2d')!
   const papers = getPaperImages()
 
+  const pages = deckPages(deck)
+
   try {
-    for (const [i, page] of deck.pages.entries()) {
+    for (const [i, page] of pages.entries()) {
       if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError')
 
       ctx.clearRect(0, 0, canvas.width, canvas.height)
@@ -80,7 +83,7 @@ export async function exportDeckPdf(
         height: f.ptH,
       })
 
-      onProgress?.(i + 1, deck.pages.length)
+      onProgress?.(i + 1, pages.length)
       // Yield so the progress count paints, an abort can land, and GC can run.
       await new Promise((r) => setTimeout(r, 0))
     }
@@ -113,7 +116,7 @@ export async function exportPagePng(
   const ctx = canvas.getContext('2d')!
   renderPage(
     ctx,
-    deck.pages[pageIndex],
+    deckPages(deck)[pageIndex],
     deck,
     canvas.width,
     canvas.height,

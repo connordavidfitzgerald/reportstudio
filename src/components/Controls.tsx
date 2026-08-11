@@ -8,6 +8,7 @@ import { PAGE_FORMATS, type FormatId } from '../config/formats'
 import type { BgRole, ImageElement, PageElement, TextElement, TextVariant } from '../doc/types'
 import { buildTemplate, templatesFor } from '../templates'
 import { useCurrentPage, useDeck } from '../store/useDeck'
+import { deckPages } from '../doc/sections'
 import { useRenderAssets } from '../hooks/useRenderAssets'
 import { ToolToggle } from './ToolToggle'
 
@@ -71,7 +72,7 @@ export function Controls() {
     setBusy('Rendering…')
     try {
       const { exportPagePng, download } = await exporter()
-      const index = deck.pages.findIndex((p) => p.id === page.id)
+      const index = deckPages(deck).findIndex((p) => p.id === page.id)
       download(await exportPagePng(deck, index, assets), `lehub-page-${index + 1}.png`)
     } catch (err) {
       console.error(err)

@@ -1,6 +1,14 @@
-import type { Deck, Page, PageElement } from '../doc/types'
+import type { Deck, PageElement } from '../doc/types'
+import { deckPages, type Section } from '../doc/sections'
 import { createDeck, ELEMENT_DEFAULTS } from '../doc/defaults'
+import { CURRENT_VERSION, migrate, type StoredAny, type StoredV2 } from './migrations'
 
+/**
+ * The storage key, deliberately NOT versioned alongside the schema. Bumping it
+ * would orphan every existing session rather than migrate it — the schema
+ * version lives inside the payload and is handled by `migrations.ts`. The `v1`
+ * suffix here only distinguishes this key from any future unrelated one.
+ */
 const KEY = 'lehub.deck.session.v1'
 
 /**
@@ -10,16 +18,12 @@ const KEY = 'lehub.deck.session.v1'
  * will churn far more than a flat state object did, so the seam goes in now
  * rather than after the first breaking change.
  */
-const VERSION = 1
+const VERSION = CURRENT_VERSION
 
 /** Refuse to write a payload big enough to be near the ~5MB localStorage quota. */
 const MAX_BYTES = 2_000_000
 
-interface Stored {
-  v: number
-  deck: Deck
-  currentPageId: string
-}
+type Stored = StoredV2
 
 export function saveSession(deck: Deck, currentPageId: string): void {
   try {
@@ -38,11 +42,6 @@ export function saveSession(deck: Deck, currentPageId: string): void {
   }
 }
 
-function migrate(stored: Stored): Stored {
-  // No migrations yet. Each future version bump adds a step here, in order.
-  return stored
-}
-
 /** Spread stored data over fresh defaults so older sessions still load. */
 function reviveElement(raw: PageElement): PageElement | null {
   const defaults = ELEMENT_DEFAULTS[raw?.kind as keyof typeof ELEMENT_DEFAULTS]
@@ -50,10 +49,14 @@ function reviveElement(raw: PageElement): PageElement | null {
   return { ...defaults, ...raw } as PageElement
 }
 
-function revivePage(raw: Page): Page | null {
+function reviveSection(raw: Section): Section | null {
   if (!raw?.id) return null
   const elements = (raw.elements ?? []).map(reviveElement).filter((e): e is PageElement => !!e)
-  return { ...raw, elements }
+  // `kind` is asserted rather than trusted: anything reaching here has been
+  // through the migration above, and a hand-edited or truncated entry missing
+  // the field still loads. Once flow sections exist this becomes a branch, and
+  // the type checker will say so.
+  return { ...raw, kind: 'static', elements }
 }
 
 export function loadSession(): { deck: Deck; currentPageId: string } | null {
@@ -61,16 +64,19 @@ export function loadSession(): { deck: Deck; currentPageId: string } | null {
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return null
-    stored = migrate(JSON.parse(raw) as Stored)
+    stored = migrate(JSON.parse(raw) as StoredAny)
   } catch {
     return null
   }
 
   const base = createDeck()
-  const pages = (stored.deck?.pages ?? []).map(revivePage).filter((p): p is Page => !!p)
-  if (!pages.length) return null
+  const sections = (stored.deck?.sections ?? [])
+    .map(reviveSection)
+    .filter((s): s is Section => !!s)
+  if (!sections.length) return null
 
-  const deck: Deck = { ...base, ...stored.deck, pages }
+  const deck: Deck = { ...base, ...stored.deck, sections }
+  const pages = deckPages(deck)
   const currentPageId = pages.some((p) => p.id === stored.currentPageId)
     ? stored.currentPageId
     : pages[0].id

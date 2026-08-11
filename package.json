@@ -9,7 +9,8 @@
     "lint": "oxlint",
     "optimize:assets": "node scripts/optimize-assets.mjs",
     "preview": "vite preview",
-    "spike:pdf": "node scripts/spike-pdf.mjs"
+    "spike:pdf": "node scripts/spike-pdf.mjs",
+    "check:migrations": "node scripts/check-migrations.mjs"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",

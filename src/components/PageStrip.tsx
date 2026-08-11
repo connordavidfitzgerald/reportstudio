@@ -3,6 +3,7 @@ import { useFontsReady } from '../core/hooks/useFontsReady'
 import { getFormat } from '../config/formats'
 import { useImageCache } from '../doc/imageCache'
 import type { Deck, Page } from '../doc/types'
+import { deckPages } from '../doc/sections'
 import { renderPage } from '../render/renderPage'
 import { useDeck } from '../store/useDeck'
 import { useRenderAssets } from '../hooks/useRenderAssets'
@@ -105,7 +106,7 @@ export function PageStrip() {
   return (
     <div className="flex items-end gap-3 border-t border-black bg-white/95 px-4 py-3">
       <div className="flex min-w-0 flex-1 items-end gap-3 overflow-x-auto">
-        {deck.pages.map((page, i) => (
+        {deckPages(deck).map((page, i) => (
           <Thumb
             key={page.id}
             page={page}
@@ -140,7 +141,7 @@ export function PageStrip() {
         </button>
         <button
           type="button"
-          disabled={deck.pages.length <= 1}
+          disabled={deckPages(deck).length <= 1}
           className="border border-black px-2 py-1 font-review text-xs uppercase hover:bg-black/5 disabled:opacity-40"
           onClick={() => removePage(currentPageId)}
         >

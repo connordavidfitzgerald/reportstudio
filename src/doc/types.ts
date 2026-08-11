@@ -1,6 +1,7 @@
 import type { HalftoneParams, TextAlign } from '../core/types'
 import type { ImageRef } from '../core/imageStore'
 import type { FormatId } from '../config/formats'
+import type { Section } from './sections'
 
 /**
  * A grid box — the *only* positional state an element has. There are no pixel
@@ -101,5 +102,10 @@ export interface Deck {
   paperIds: string[]
   /** Per-paper opacity (0..1), keyed by paper id. */
   paperOpacities: Record<string, number>
-  pages: Page[]
+  /**
+   * What the document is authored as. Rendered pages are derived from this via
+   * `deckPages()` in `doc/sections.ts` — today 1:1, but a flow section will
+   * expand to as many pages as its content needs.
+   */
+  sections: Section[]
 }

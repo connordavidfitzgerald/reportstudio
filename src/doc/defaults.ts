@@ -8,10 +8,10 @@ import type {
   Deck,
   ImageElement,
   LogoElement,
-  Page,
   PageElement,
   TextElement,
 } from './types'
+import type { StaticSection } from './sections'
 
 let seq = 0
 const uid = (prefix: string) => `${prefix}_${Date.now().toString(36)}_${(seq++).toString(36)}`
@@ -70,8 +70,15 @@ export function createElement<K extends PageElement['kind']>(
   } as unknown as OfKind<K>
 }
 
-export function createPage(elements: PageElement[] = [], templateId?: string): Page {
-  return { id: pageId(), elements, templateId }
+/**
+ * A hand-composed section, which is also exactly one page — see
+ * `doc/sections.ts` for why those are the same object.
+ */
+export function createSection(
+  elements: PageElement[] = [],
+  templateId?: string,
+): StaticSection {
+  return { kind: 'static', id: pageId(), elements, templateId }
 }
 
 /**
@@ -79,10 +86,10 @@ export function createPage(elements: PageElement[] = [], templateId?: string): P
  * rather than an empty rectangle. Replaced by the template library in due
  * course — this is scaffolding, not a template.
  */
-function createStarterPage(format: FormatId): Page {
+function createStarterPage(format: FormatId): StaticSection {
   const f = getFormat(format)
   const half = Math.round(f.cols / 2)
-  return createPage([
+  return createSection([
     createElement('text', { col: 0, row: 1, colSpan: f.cols, rowSpan: 3 }, {
       text: 'Le Hub',
       variant: 'header',
@@ -106,7 +113,7 @@ export function createDeck(format: FormatId = 'slide'): Deck {
     paperOpacities: Object.fromEntries(
       PAPERS.filter((p) => p.src).map((p) => [p.id, p.defaultOpacity ?? DEFAULT_PAPER_OPACITY]),
     ),
-    pages: [createStarterPage(format)],
+    sections: [createStarterPage(format)],
   }
 }
 

@@ -1,8 +1,9 @@
 import { create } from 'zustand'
 import { pruneImageBlobs } from '../core/imageStore'
 import { collectBlobIds } from '../doc/imageCache'
-import { createDeck, createPage, pageId } from '../doc/defaults'
+import { createDeck, createSection, pageId } from '../doc/defaults'
 import type { Box, Deck, Page, PageElement } from '../doc/types'
+import { deckPages, type Section, type StaticSection } from '../doc/sections'
 import type { FormatId } from '../config/formats'
 import { getFormat } from '../config/formats'
 import { grid } from '../render/grid'
@@ -16,7 +17,7 @@ import { loadSession, saveSession } from './session'
 // four objects (pages → page → elements → element), not a deep copy of the deck.
 
 export interface Snapshot {
-  pages: Page[]
+  sections: Section[]
   currentPageId: string
 }
 
@@ -120,11 +121,15 @@ interface DeckStore {
 /**
  * The two helpers every mutator goes through. Keeping the rebuild in one place
  * is what makes the immutability guarantee above hold — and what makes "only the
- * edited page's thumbnail repaints" fall out for free, since untouched pages
+ * edited page's thumbnail repaints" fall out for free, since untouched sections
  * keep their object identity.
  */
-function mapPage(deck: Deck, id: string, fn: (p: Page) => Page): Deck {
-  return { ...deck, pages: deck.pages.map((p) => (p.id === id ? fn(p) : p)) }
+function mapSection(
+  deck: Deck,
+  id: string,
+  fn: (s: StaticSection) => StaticSection,
+): Deck {
+  return { ...deck, sections: deck.sections.map((s) => (s.id === id ? fn(s) : s)) }
 }
 
 function mapElements(
@@ -133,7 +138,7 @@ function mapElements(
   ids: Set<string>,
   fn: (el: PageElement) => PageElement,
 ): Deck {
-  return mapPage(deck, pgId, (p) => ({
+  return mapSection(deck, pgId, (p) => ({
     ...p,
     elements: p.elements.map((el) => (ids.has(el.id) ? fn(el) : el)),
   }))
@@ -142,7 +147,7 @@ function mapElements(
 const restored = loadSession()
 const initial = restored ?? (() => {
   const deck = createDeck()
-  return { deck, currentPageId: deck.pages[0].id }
+  return { deck, currentPageId: deckPages(deck)[0].id }
 })()
 
 /** True when this session came back from localStorage rather than starting fresh. */
@@ -165,8 +170,8 @@ export const useDeck = create<DeckStore>((set, get) => ({
       lastTag = null
       return {
         past: s.past.slice(0, -1),
-        future: [...s.future, { pages: s.deck.pages, currentPageId: s.currentPageId }],
-        deck: { ...s.deck, pages: prev.pages },
+        future: [...s.future, { sections: s.deck.sections, currentPageId: s.currentPageId }],
+        deck: { ...s.deck, sections: prev.sections },
         currentPageId: prev.currentPageId,
         // Selection lives outside history; drop anything the undo removed.
         selectedIds: [],
@@ -182,8 +187,8 @@ export const useDeck = create<DeckStore>((set, get) => ({
       lastTag = null
       return {
         future: s.future.slice(0, -1),
-        past: [...s.past, { pages: s.deck.pages, currentPageId: s.currentPageId }],
-        deck: { ...s.deck, pages: next.pages },
+        past: [...s.past, { sections: s.deck.sections, currentPageId: s.currentPageId }],
+        deck: { ...s.deck, sections: next.sections },
         currentPageId: next.currentPageId,
         selectedIds: [],
         editingId: null,
@@ -194,7 +199,7 @@ export const useDeck = create<DeckStore>((set, get) => ({
     tagged(tag, () =>
       set((s) => ({
         deck: deepFreeze(
-          mapPage(s.deck, pgId, (p) => ({ ...p, elements: [...p.elements, el] })),
+          mapSection(s.deck, pgId, (p) => ({ ...p, elements: [...p.elements, el] })),
         ),
         selectedIds: [el.id],
       })),
@@ -227,7 +232,7 @@ export const useDeck = create<DeckStore>((set, get) => ({
         const drop = new Set(ids)
         return {
           deck: deepFreeze(
-            mapPage(s.deck, pgId, (p) => ({
+            mapSection(s.deck, pgId, (p) => ({
               ...p,
               elements: p.elements.filter((el) => !drop.has(el.id)),
             })),
@@ -241,7 +246,7 @@ export const useDeck = create<DeckStore>((set, get) => ({
   duplicateElements: (pgId, ids) =>
     tagged('element:duplicate', () =>
       set((s) => {
-        const page = s.deck.pages.find((p) => p.id === pgId)
+        const page = s.deck.sections.find((p) => p.id === pgId)
         if (!page) return {}
         const f = getFormat(s.deck.format)
         const g = grid(f.w, f.h, f.cols, f.rows, f.margin * f.w)
@@ -255,7 +260,7 @@ export const useDeck = create<DeckStore>((set, get) => ({
           }))
         return {
           deck: deepFreeze(
-            mapPage(s.deck, pgId, (p) => ({ ...p, elements: [...p.elements, ...copies] })),
+            mapSection(s.deck, pgId, (p) => ({ ...p, elements: [...p.elements, ...copies] })),
           ),
           selectedIds: copies.map((c) => c.id),
         }
@@ -266,7 +271,7 @@ export const useDeck = create<DeckStore>((set, get) => ({
     tagged('element:z', () =>
       set((s) => ({
         deck: deepFreeze(
-          mapPage(s.deck, pgId, (p) => {
+          mapSection(s.deck, pgId, (p) => {
             const from = p.elements.findIndex((el) => el.id === id)
             if (from < 0) return p
             const next = p.elements.slice()
@@ -286,12 +291,12 @@ export const useDeck = create<DeckStore>((set, get) => ({
   addPage: (at, elements = [], templateId) =>
     tagged('page:add', () =>
       set((s) => {
-        const page = createPage(elements, templateId)
-        const index = at ?? s.deck.pages.findIndex((p) => p.id === s.currentPageId) + 1
-        const pages = s.deck.pages.slice()
-        pages.splice(index, 0, page)
+        const page = createSection(elements, templateId)
+        const index = at ?? s.deck.sections.findIndex((p) => p.id === s.currentPageId) + 1
+        const sections = s.deck.sections.slice()
+        sections.splice(index, 0, page)
         return {
-          deck: deepFreeze({ ...s.deck, pages }),
+          deck: deepFreeze({ ...s.deck, sections }),
           currentPageId: page.id,
           selectedIds: [],
         }
@@ -303,7 +308,7 @@ export const useDeck = create<DeckStore>((set, get) => ({
       set((s) => ({
         // Replaces the page's contents: a template is a starting composition,
         // not a layer to stack onto whatever was already there.
-        deck: deepFreeze(mapPage(s.deck, pgId, (p) => ({ ...p, elements, templateId }))),
+        deck: deepFreeze(mapSection(s.deck, pgId, (p) => ({ ...p, elements, templateId }))),
         selectedIds: [],
         editingId: null,
       })),
@@ -312,46 +317,46 @@ export const useDeck = create<DeckStore>((set, get) => ({
   duplicatePage: (id) =>
     tagged('page:duplicate', () =>
       set((s) => {
-        const index = s.deck.pages.findIndex((p) => p.id === id)
+        const index = s.deck.sections.findIndex((p) => p.id === id)
         if (index < 0) return {}
         // Elements are copied with fresh ids; image *references* are shared, so
         // the duplicate reuses the same decode rather than loading it again.
-        const copy: Page = {
-          ...s.deck.pages[index],
+        const copy: StaticSection = {
+          ...s.deck.sections[index],
           id: pageId(),
-          elements: s.deck.pages[index].elements.map((el) => ({
+          elements: s.deck.sections[index].elements.map((el) => ({
             ...el,
             id: `${el.id}_c${Math.random().toString(36).slice(2, 7)}`,
           })),
         }
-        const pages = s.deck.pages.slice()
-        pages.splice(index + 1, 0, copy)
-        return { deck: deepFreeze({ ...s.deck, pages }), currentPageId: copy.id, selectedIds: [] }
+        const sections = s.deck.sections.slice()
+        sections.splice(index + 1, 0, copy)
+        return { deck: deepFreeze({ ...s.deck, sections }), currentPageId: copy.id, selectedIds: [] }
       }),
     ),
 
   removePage: (id) =>
     tagged('page:remove', () =>
       set((s) => {
-        if (s.deck.pages.length <= 1) return {} // never leave a deck with no pages
-        const index = s.deck.pages.findIndex((p) => p.id === id)
-        const pages = s.deck.pages.filter((p) => p.id !== id)
+        if (s.deck.sections.length <= 1) return {} // never leave a deck with no pages
+        const index = s.deck.sections.findIndex((p) => p.id === id)
+        const sections = s.deck.sections.filter((p) => p.id !== id)
         const currentPageId =
-          s.currentPageId === id ? pages[Math.min(index, pages.length - 1)].id : s.currentPageId
-        return { deck: deepFreeze({ ...s.deck, pages }), currentPageId, selectedIds: [] }
+          s.currentPageId === id ? sections[Math.min(index, sections.length - 1)].id : s.currentPageId
+        return { deck: deepFreeze({ ...s.deck, sections }), currentPageId, selectedIds: [] }
       }),
     ),
 
   reorderPage: (fromId, toId) =>
     tagged('page:reorder', () =>
       set((s) => {
-        const from = s.deck.pages.findIndex((p) => p.id === fromId)
-        const to = s.deck.pages.findIndex((p) => p.id === toId)
+        const from = s.deck.sections.findIndex((p) => p.id === fromId)
+        const to = s.deck.sections.findIndex((p) => p.id === toId)
         if (from < 0 || to < 0 || from === to) return {}
-        const pages = s.deck.pages.slice()
-        const [moved] = pages.splice(from, 1)
-        pages.splice(to, 0, moved)
-        return { deck: deepFreeze({ ...s.deck, pages }) }
+        const sections = s.deck.sections.slice()
+        const [moved] = sections.splice(from, 1)
+        sections.splice(to, 0, moved)
+        return { deck: deepFreeze({ ...s.deck, sections }) }
       }),
     ),
 
@@ -374,7 +379,7 @@ export const useDeck = create<DeckStore>((set, get) => ({
         const g = grid(to.w, to.h, to.cols, to.rows, to.margin * to.w)
         // Proportional remap. Lossy for tight compositions — the UI gates this
         // behind a confirmation.
-        const pages = s.deck.pages.map((p) => ({
+        const sections = s.deck.sections.map((p) => ({
           ...p,
           elements: p.elements.map((el) => ({
             ...el,
@@ -386,7 +391,7 @@ export const useDeck = create<DeckStore>((set, get) => ({
             }),
           })),
         }))
-        return { deck: deepFreeze({ ...s.deck, format, pages }) }
+        return { deck: deepFreeze({ ...s.deck, format, sections }) }
       }),
     ),
 
@@ -396,12 +401,17 @@ export const useDeck = create<DeckStore>((set, get) => ({
   endEdit: () =>
     tagged(null, () => {
       endCoalesce()
+      // Read the id *before* clearing it. Clearing first made the lookup below
+      // compare against null, so the cleanup never ran and every mis-click with
+      // the text tool left an invisible, selectable, persisted empty box behind.
+      const editedId = get().editingId
       set({ editingId: null })
+      if (!editedId) return
       // A text element left empty is litter from a stray click — drop it.
       const s = get()
-      const page = s.deck.pages.find((p) => p.id === s.currentPageId)
+      const page = s.deck.sections.find((p) => p.id === s.currentPageId)
       const empty = page?.elements.find(
-        (el) => el.id === s.editingId && el.kind === 'text' && !el.text.trim(),
+        (el) => el.id === editedId && el.kind === 'text' && !el.text.trim(),
       )
       if (page && empty) s.removeElements(page.id, [empty.id])
     }),
@@ -413,7 +423,7 @@ export const useDeck = create<DeckStore>((set, get) => ({
 // extend the current step rather than adding another.
 
 useDeck.subscribe((s, prev) => {
-  if (s.deck.pages === prev.deck.pages) {
+  if (s.deck.sections === prev.deck.sections) {
     pendingTag = null
     return // selection / edit-mode changes are not edits
   }
@@ -432,7 +442,7 @@ useDeck.subscribe((s, prev) => {
   lastAt = now
   if (coalesce) return
 
-  const past = [...s.past, { pages: prev.deck.pages, currentPageId: prev.currentPageId }]
+  const past = [...s.past, { sections: prev.deck.sections, currentPageId: prev.currentPageId }]
   useDeck.setState({
     past: past.length > HISTORY_LIMIT ? past.slice(past.length - HISTORY_LIMIT) : past,
     future: [], // a fresh edit invalidates anything that was undone
@@ -455,5 +465,7 @@ export function pruneImages(): Promise<void> {
 
 /** The page currently open in the editor. */
 export function useCurrentPage(): Page {
-  return useDeck((s) => s.deck.pages.find((p) => p.id === s.currentPageId) ?? s.deck.pages[0])
+  return useDeck(
+    (s) => deckPages(s.deck).find((p) => p.id === s.currentPageId) ?? deckPages(s.deck)[0],
+  )
 }

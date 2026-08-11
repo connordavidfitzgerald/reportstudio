@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { loadImageRef, type ImageRef } from '../core/imageStore'
 import type { Deck, Page } from './types'
+import { deckPages } from './sections'
 
 /**
  * Decoded images, keyed by reference, living *outside* the document.
@@ -73,7 +74,7 @@ export function getImage(ref: ImageRef | null): HTMLImageElement | null {
 /** Every image reference in a deck, de-duplicated. */
 export function collectImageRefs(deck: Deck): ImageRef[] {
   const seen = new Map<string, ImageRef>()
-  for (const page of deck.pages) {
+  for (const page of deckPages(deck)) {
     for (const el of page.elements) {
       if (el.kind === 'image' && el.imageRef) seen.set(refKey(el.imageRef), el.imageRef)
     }
