@@ -8,9 +8,11 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "optimize:assets": "node scripts/optimize-assets.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "spike:pdf": "node scripts/spike-pdf.mjs"
   },
   "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
     "pdf-lib": "^1.17.1",
     "polygon-clipping": "^0.15.7",
     "react": "^19.2.7",
