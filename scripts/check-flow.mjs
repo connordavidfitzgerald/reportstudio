@@ -39,7 +39,7 @@ function stubCtx() {
 }
 
 const ASSETS = { logo: null, papers: {}, image: () => null }
-const deck = { format: 'a4', paletteId: 'paper', paperIds: [], paperOpacities: {}, sections: [] }
+const deck = { format: 'a4', lang: 'en', paletteId: 'paper', paperIds: [], paperOpacities: {}, sections: [] }
 const F = getFormat('a4')
 const BOTTOM = F.h - MARGIN * F.w
 
@@ -176,4 +176,98 @@ const furnitureOf = (page) => page.items.filter((i) => i.source === 'furniture')
   assert.ok(item.frame.yFrac > 0, 'content starts below the running head')
 }
 
-console.log('flow ok — furniture, folios, breaks, keep-with-next, splitting, overflow')
+// -- structured kinds compile to several parts, all inside the margins -------
+{
+  const blocks = [
+    { id: 'd', kind: 'defList', rows: [
+      { term: 'Campaign development', def: 'The process of ideating and carrying out a campaign.' },
+      { term: 'Security culture', def: 'Skills, roles and best practices for safety.' },
+    ] },
+    { id: 'c', kind: 'chart', unit: '%', series: [
+      { label: 'Doing', sublabel: 'Campaign/Action', value: 40 },
+      { label: 'Being', sublabel: 'Culture/Relating', value: 25 },
+      { label: 'Structural factors', value: 7.5 },
+    ] },
+    { id: 'r', kind: 'links', title: 'Resources', items: [
+      { label: 'Groundswell', href: 'https://x.y' },
+      { label: 'Another', href: 'https://x.z' },
+    ] },
+    { id: 'st', kind: 'statement', text: 'Le HUB members spoke with 21 organizers.' },
+    { id: 'l2', kind: 'list', columns: 2, items: Array.from({ length: 10 }, (_, i) => `Code ${i}`) },
+  ]
+  const pages = flow(blocks)
+  const placed = pages.flatMap(contentOf)
+  for (const b of blocks) {
+    assert.ok(placed.some((i) => i.blockId === b.id), `${b.kind} was placed`)
+  }
+  // A definition list is several elements per row, all belonging to one block.
+  assert.ok(placed.filter((i) => i.blockId === 'd').length >= 6, 'defList emits rule/term/def per row')
+
+  for (const item of placed) {
+    const end = (item.frame.yFrac + item.frame.hFrac) * F.h
+    assert.ok(end <= BOTTOM + 0.5, `${item.blockId} ends at ${end}, past ${BOTTOM}`)
+  }
+}
+
+// -- chart bars are proportional to their values -----------------------------
+{
+  const pages = flow([
+    { id: 'c', kind: 'chart', unit: '%', series: [
+      { label: 'A', value: 40 },
+      { label: 'B', value: 20 },
+      { label: 'C', value: 0 },
+    ] },
+  ])
+  const bars = pages
+    .flatMap(contentOf)
+    .filter((i) => i.el.kind === 'block' && i.el.bg?.startsWith('chart'))
+  assert.equal(bars.length, 3)
+  // Half the value, half the bar. The Figma's hand-drawn bars are only roughly
+  // proportional; the tool should be exact.
+  assert.ok(Math.abs(bars[1].frame.wFrac * 2 - bars[0].frame.wFrac) < 1e-9, 'bar width tracks value')
+  assert.equal(bars[2].frame.wFrac, 0, 'a zero value is a zero-width bar, not a minimum one')
+  assert.ok(bars.every((b) => b.frame.wFrac <= 0.5), 'bars stay in their half of the column')
+}
+
+// -- definition lists split between rows, never inside one -------------------
+{
+  const rows = Array.from({ length: 24 }, (_, i) => ({
+    term: `Term ${i}`,
+    def: words(25),
+  }))
+  const pages = flow([{ id: 'd', kind: 'defList', rows }])
+  assert.ok(pages.length > 1, 'a long definition list paginates')
+  // Every term appears exactly once, and always on the same page as its definition.
+  const terms = pages.flatMap(contentOf).filter((i) => /-t\d+$/.test(i.el.id))
+  assert.equal(terms.length, rows.length, 'every row survives exactly once')
+  for (const page of pages) {
+    const ids = contentOf(page).map((i) => i.el.id)
+    for (const id of ids.filter((x) => /-t(\d+)$/.test(x))) {
+      const n = /-t(\d+)$/.exec(id)[1]
+      assert.ok(ids.includes(id.replace(`-t${n}`, `-d${n}`)), `term ${n} kept with its definition`)
+    }
+  }
+}
+
+// -- language selects the edition, and both typeset --------------------------
+{
+  const bilingual = [
+    { id: 'h', kind: 'heading', text: { en: 'Findings', fr: 'Constatations' } },
+    { id: 'p', kind: 'para', text: { en: 'English body.', fr: 'Corps francais.' } },
+    { id: 'u', kind: 'para', text: 'Untranslated, shared by both.' },
+  ]
+  const en = flowSection({ kind: 'flow', id: 's', title: { en: 'Findings', fr: 'Constatations' }, blocks: bilingual }, deck, stubCtx(), ASSETS, { lang: 'en' })
+  const fr = flowSection({ kind: 'flow', id: 's', title: { en: 'Findings', fr: 'Constatations' }, blocks: bilingual }, deck, stubCtx(), ASSETS, { lang: 'fr' })
+
+  const headOf = (pages) => furnitureOf(pages[0]).find((i) => i.el.align === 'left').el.text
+  assert.equal(headOf(en), 'FINDINGS')
+  assert.equal(headOf(fr), 'CONSTATATIONS', 'the running head follows the edition')
+
+  const bodyOf = (pages, id) => pages.flatMap(contentOf).find((i) => i.blockId === id).el.text
+  assert.ok(bodyOf(en, 'p').includes('English body.'))
+  assert.ok(bodyOf(fr, 'p').includes('Corps francais.'))
+  // A shared string appears in both rather than leaving a blank.
+  assert.ok(bodyOf(fr, 'u').includes('Untranslated'), 'plain strings serve both editions')
+}
+
+console.log('flow ok — furniture, folios, breaks, keep-with-next, splitting, structured kinds, charts, bilingual')

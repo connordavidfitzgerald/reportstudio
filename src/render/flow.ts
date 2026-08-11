@@ -1,10 +1,12 @@
-import { BODY_INDENT_EM, BLOCK_GAP, MARGIN, TYPE } from '../config/brand'
+import { BLOCK_GAP, BODY_INDENT_EM, MARGIN, TYPE } from '../config/brand'
 import { getFormat, typeStepFor, type PageFormat } from '../config/formats'
+import { PAD_RATIO } from '../core/config/constants'
 import { measureParagraph } from '../core/elements'
-import type { Block } from '../doc/blocks'
+import type { Block, BlockId } from '../doc/blocks'
 import { isSplittable, keepsWithNext } from '../doc/blocks'
+import { t, type Lang } from '../doc/localized'
 import type { FlowSection } from '../doc/sections'
-import type { Deck, PageElement, TextElement } from '../doc/types'
+import type { BgRole, Deck, PageElement, TextElement } from '../doc/types'
 import { buildPageEnv, type PageEnv, type RenderAssets } from './env'
 import { measureText } from './layoutPage'
 import type { Frame, RenderItem, RenderPage } from './page'
@@ -16,110 +18,379 @@ import type { Frame, RenderItem, RenderPage } from './page'
  * from `section.blocks` on demand, so an edit anywhere upstream simply produces
  * different pages, and no part of the document can go stale relative to another.
  *
- * Blocks compile to ordinary `PageElement`s and are placed with {@link Frame}s,
- * which means flowed content is measured and drawn by exactly the same code as
- * hand-placed content. This file decides *where things break*; it does not know
- * how to draw anything.
+ * Blocks compile to ordinary `PageElement`s placed with {@link Frame}s, so
+ * flowed content is measured and drawn by exactly the same code as hand-placed
+ * content. This file decides *what goes where and where things break*; it does
+ * not know how to draw anything.
  */
 
-/** A block compiled to something drawable, with its measured height. */
-interface Piece {
+/** One element within a compiled block, positioned relative to the block's top. */
+interface Part {
   el: PageElement
-  blockId: string
-  height: number
-  keepWithNext: boolean
-  /** Remaining text if this piece is the head of a split block. */
-  rest?: Block
+  col: number
+  colSpan: number
+  /** Sub-column override — chart bars only. See {@link Frame}. */
+  xFrac?: number
+  wFrac?: number
+  dy: number
+  h: number
 }
 
-// ---------------------------------------------------------------------------
-// Compiling blocks to elements
-// ---------------------------------------------------------------------------
+/** A block compiled to drawable parts, with its total height. */
+interface Piece {
+  parts: Part[]
+  height: number
+}
+
+/**
+ * How a splittable block can be cut.
+ *
+ * `unitHeights` are the pieces the paginator may break between — lines for a
+ * paragraph, items for a list, rows for a definition list. `make` rebuilds the
+ * block from a slice of them.
+ */
+interface SplitPlan {
+  unitHeights: number[]
+  make: (from: number, to: number) => Block
+}
 
 const EMPTY_BOX = { col: 0, row: 0, colSpan: 1, rowSpan: 1 }
 
-/**
- * The type role each block kind uses. Sizes are steps on the brand ladder, never
- * raw pixels, so the same blocks typeset correctly at any page size.
- */
-function textFor(block: Block, format: PageFormat): TextElement {
-  const base = {
-    kind: 'text' as const,
-    id: block.id,
-    box: EMPTY_BOX,
-    align: 'left' as const,
-    vAlign: 'top' as const,
-    autoHeight: true,
-  }
-  switch (block.kind) {
-    case 'heading':
-      return { ...base, text: block.text, variant: 'plain', step: TYPE.chapterTitle.step, bg: 'none' }
-    case 'subhead':
-      return { ...base, text: block.text.toUpperCase(), variant: 'plain', step: TYPE.subhead.step, bg: 'none' }
-    case 'lede':
-      return { ...base, text: block.text, variant: 'paragraph', step: TYPE.lede.step, bg: 'none' }
-    case 'para':
-      return {
-        ...base,
-        // The indent is real text rather than a layout offset because
-        // `drawParagraph` wraps the string it is given; an offset would only
-        // move the whole block.
-        text: (block.indent === false ? '' : indentFor(block, format)) + block.text,
-        variant: 'paragraph',
-        step: TYPE.body.step,
-        bg: 'none',
-      }
-    case 'list':
-      return {
-        ...base,
-        text: block.items.map((i) => `•  ${i}`).join('\n'),
-        variant: 'paragraph',
-        step: TYPE.body.step,
-        bg: 'none',
-      }
-    case 'quote':
-      return {
-        ...base,
-        text: block.attribution ? `${block.text}\n— ${block.attribution}` : block.text,
-        variant: 'badge',
-        step: TYPE.lede.step,
-        bg: 'highlight',
-      }
-  }
+// ---------------------------------------------------------------------------
+// Compiling
+// ---------------------------------------------------------------------------
+
+interface Ctx {
+  env: PageEnv
+  format: PageFormat
+  lang: Lang
+  /** Content column width in page pixels. */
+  width: number
+  gap: number
 }
+
+const textEl = (
+  id: string,
+  text: string,
+  step: number,
+  opts: Partial<TextElement> = {},
+): TextElement => ({
+  kind: 'text',
+  id,
+  box: EMPTY_BOX,
+  text,
+  variant: 'paragraph',
+  step,
+  align: 'left',
+  vAlign: 'top',
+  bg: 'none',
+  autoHeight: true,
+  ...opts,
+})
+
+/** Height of a text element laid out in `w` pixels. */
+const heightOf = (cx: Ctx, el: TextElement, w: number): number =>
+  measureText(cx.env, el, w).height
+
+const px = (cx: Ctx, step: number): number =>
+  cx.env.shortEdge * typeStepFor(cx.format, step)
 
 /** A first-line indent, as spaces sized to the body em. */
-function indentFor(_block: Block, _format: PageFormat): string {
-  return ' '.repeat(Math.round(BODY_INDENT_EM * 2))
+const INDENT = ' '.repeat(Math.round(BODY_INDENT_EM * 2))
+
+/** One full-width part, the common case. */
+const full = (cx: Ctx, el: PageElement, h: number, dy = 0): Part => ({
+  el,
+  col: 0,
+  colSpan: cx.format.cols,
+  dy,
+  h,
+})
+
+function compile(cx: Ctx, block: Block): Piece {
+  const { width, format } = cx
+  const L = (v: Parameters<typeof t>[0]): string => t(v, cx.lang)
+
+  switch (block.kind) {
+    case 'heading': {
+      const el = textEl(block.id, L(block.text), TYPE.chapterTitle.step, { variant: 'plain' })
+      const h = heightOf(cx, el, width)
+      return { parts: [full(cx, el, h)], height: h }
+    }
+    case 'subhead': {
+      // The ruled band: rule, caps label, rule.
+      const label = textEl(block.id, L(block.text).toUpperCase(), TYPE.subhead.step, {
+        variant: 'plain',
+      })
+      const labelH = heightOf(cx, label, width)
+      const ruleH = Math.max(1, format.w / 1190)
+      const pad = px(cx, TYPE.subhead.step) * 0.4
+      const rule = (n: string, dy: number): Part =>
+        full(cx, { kind: 'block', id: `${block.id}-${n}`, box: EMPTY_BOX, bg: 'ink' }, ruleH, dy)
+      return {
+        parts: [rule('r1', 0), full(cx, label, labelH, ruleH + pad), rule('r2', ruleH + pad + labelH + pad)],
+        height: ruleH * 2 + pad * 2 + labelH,
+      }
+    }
+    case 'lede': {
+      const el = textEl(block.id, L(block.text), TYPE.lede.step)
+      const h = heightOf(cx, el, width)
+      return { parts: [full(cx, el, h)], height: h }
+    }
+    case 'para': {
+      const el = textEl(
+        block.id,
+        (block.indent === false ? '' : INDENT) + L(block.text),
+        TYPE.body.step,
+      )
+      const h = heightOf(cx, el, width)
+      return { parts: [full(cx, el, h)], height: h }
+    }
+    case 'list': {
+      const cols = block.columns ?? 1
+      const colW = width / cols
+      const items = block.items.map((i) => `•  ${L(i)}`)
+      if (cols === 1) {
+        const el = textEl(block.id, items.join('\n'), TYPE.body.step)
+        const h = heightOf(cx, el, width)
+        return { parts: [full(cx, el, h)], height: h }
+      }
+      // Two columns, filled down then across, as the open-codes page does.
+      const half = Math.ceil(items.length / 2)
+      const span = Math.floor(format.cols / 2)
+      const left = textEl(`${block.id}-l`, items.slice(0, half).join('\n'), TYPE.body.step)
+      const right = textEl(`${block.id}-r`, items.slice(half).join('\n'), TYPE.body.step)
+      const lh = heightOf(cx, left, colW)
+      const rh = heightOf(cx, right, colW)
+      return {
+        parts: [
+          { el: left, col: 0, colSpan: span, dy: 0, h: lh },
+          { el: right, col: span, colSpan: format.cols - span, dy: 0, h: rh },
+        ],
+        height: Math.max(lh, rh),
+      }
+    }
+    case 'quote':
+    case 'statement': {
+      const text =
+        block.kind === 'quote' && block.attribution
+          ? `${L(block.text)}\n— ${L(block.attribution)}`
+          : L(block.text)
+      // The display voice on a swash — the same notched treatment as the poster.
+      const el = textEl(block.id, text, TYPE.lede.step, { variant: 'header', bg: 'highlight' })
+      const h = heightOf(cx, el, width)
+      return { parts: [full(cx, el, h)], height: h }
+    }
+    case 'defList': {
+      const termSpan = Math.round(format.cols * 5 / 12)
+      const defSpan = format.cols - termSpan
+      const termW = (width * termSpan) / format.cols
+      const defW = (width * defSpan) / format.cols
+      const ruleH = Math.max(1, format.w / 1190)
+      const pad = px(cx, TYPE.body.step) * 0.5
+      const parts: Part[] = []
+      let y = 0
+      for (const [i, row] of block.rows.entries()) {
+        const term = textEl(`${block.id}-t${i}`, L(row.term).toUpperCase(), TYPE.body.step, {
+          variant: 'plain',
+        })
+        const def = textEl(`${block.id}-d${i}`, L(row.def), TYPE.body.step)
+        const th = heightOf(cx, term, termW)
+        const dh = heightOf(cx, def, defW)
+        parts.push(
+          full(cx, { kind: 'block', id: `${block.id}-r${i}`, box: EMPTY_BOX, bg: 'ink' }, ruleH, y),
+        )
+        parts.push({ el: term, col: 0, colSpan: termSpan, dy: y + ruleH + pad, h: th })
+        parts.push({ el: def, col: termSpan, colSpan: defSpan, dy: y + ruleH + pad, h: dh })
+        y += ruleH + pad + Math.max(th, dh) + pad
+      }
+      return { parts, height: y }
+    }
+    case 'links': {
+      const parts: Part[] = []
+      const title = textEl(`${block.id}-h`, L(block.title), TYPE.deck.step, { variant: 'plain' })
+      let y = heightOf(cx, title, width)
+      parts.push(full(cx, title, y))
+      for (const [i, item] of block.items.entries()) {
+        y += cx.gap
+        const label = textEl(`${block.id}-a${i}`, L(item.label), TYPE.body.step, {
+          variant: 'plain',
+        })
+        const lh = heightOf(cx, label, width)
+        parts.push(full(cx, label, lh, y))
+        y += lh
+        if (item.note) {
+          const note = textEl(`${block.id}-n${i}`, L(item.note), TYPE.body.step)
+          const nh = heightOf(cx, note, width)
+          parts.push(full(cx, note, nh, y))
+          y += nh
+        }
+      }
+      return { parts, height: y }
+    }
+    case 'figure': {
+      const aspect = block.aspect ?? 0.62
+      const imgH = width * aspect
+      const parts: Part[] = [
+        full(
+          cx,
+          {
+            kind: 'image',
+            id: block.id,
+            box: EMPTY_BOX,
+            imageRef: block.imageRef,
+            halftone: block.halftone ? cx.format.halftone : null,
+          },
+          imgH,
+        ),
+      ]
+      let y = imgH
+      const caption = [block.caption && L(block.caption), block.credit && L(block.credit)]
+        .filter(Boolean)
+        .join('  ·  ')
+      if (caption) {
+        y += cx.gap * 0.5
+        const el = textEl(`${block.id}-c`, caption, TYPE.caption.step)
+        const h = heightOf(cx, el, width)
+        parts.push(full(cx, el, h, y))
+        y += h
+      }
+      return { parts, height: y }
+    }
+    case 'chart': {
+      const max = block.max ?? Math.max(...block.series.map((s) => s.value), 1)
+      // Bars occupy the left half; the number and its labels sit to the right.
+      const barZone = 0.5
+      const numStep = TYPE.statNumber.step - 2
+      const rowH = px(cx, numStep) * 1.5
+      const parts: Part[] = []
+      let y = 0
+      for (const [i, s] of block.series.entries()) {
+        const frac = Math.max(0, Math.min(1, s.value / max)) * barZone
+        parts.push({
+          el: {
+            kind: 'block',
+            id: `${block.id}-b${i}`,
+            box: EMPTY_BOX,
+            bg: `chart${(i % 6) + 1}` as BgRole,
+          },
+          col: 0,
+          colSpan: cx.format.cols,
+          // A bar's width IS its value, so it is placed proportionally.
+          xFrac: 0,
+          wFrac: frac,
+          dy: y,
+          h: rowH * 0.78,
+        })
+        const num = textEl(
+          `${block.id}-v${i}`,
+          `${s.value}${block.unit ?? ''}`,
+          numStep,
+          { variant: 'plain' },
+        )
+        const numH = heightOf(cx, num, width * (1 - barZone))
+        const labelText = [L(s.label), s.sublabel && L(s.sublabel)].filter(Boolean).join('\n')
+        const label = textEl(`${block.id}-l${i}`, labelText, TYPE.caption.step)
+        const labH = heightOf(cx, label, width * (1 - barZone))
+        parts.push({
+          el: num,
+          col: 0,
+          colSpan: cx.format.cols,
+          xFrac: barZone + 0.02,
+          wFrac: 1 - barZone - 0.02,
+          dy: y,
+          h: numH,
+        })
+        parts.push({
+          el: label,
+          col: 0,
+          colSpan: cx.format.cols,
+          xFrac: barZone + 0.02,
+          wFrac: 1 - barZone - 0.02,
+          dy: y + numH,
+          h: labH,
+        })
+        y += Math.max(rowH, numH + labH) + cx.gap
+      }
+      return { parts, height: Math.max(0, y - cx.gap) }
+    }
+  }
 }
 
-/** Replace a splittable block's content with whatever is left over. */
-function withText(block: Block, lines: string[]): Block {
-  if (block.kind === 'list') return { ...block, items: lines }
-  const text = lines.join('\n')
-  // A continuation never re-indents: the first line of the tail is the middle of
-  // a sentence, not the start of a paragraph.
-  return block.kind === 'para' ? { ...block, text, indent: false } : { ...block, text }
+// ---------------------------------------------------------------------------
+// Splitting
+// ---------------------------------------------------------------------------
+
+/** How a block may be cut, or null when it is atomic. */
+function splitPlan(cx: Ctx, block: Block): SplitPlan | null {
+  if (!isSplittable(block)) return null
+  const { width } = cx
+
+  if (block.kind === 'para') {
+    const el = textEl(block.id, (block.indent === false ? '' : INDENT) + t(block.text, cx.lang), TYPE.body.step)
+    const size = px(cx, TYPE.body.step)
+    // Same padding `measureText` applies, or the per-line estimate is short.
+    const pad = cx.env.shortEdge * PAD_RATIO
+    const { lines, height } = measureParagraph(cx.env.ctx, el.text, size, width, pad)
+    if (lines.length < 2) return null
+    const per = height / lines.length
+    return {
+      unitHeights: lines.map(() => per),
+      // A continuation never re-indents: its first line is the middle of a
+      // sentence, not the start of a paragraph.
+      make: (from, to) => ({ ...block, text: lines.slice(from, to).join('\n'), indent: from === 0 ? block.indent : false }),
+    }
+  }
+
+  if (block.kind === 'list') {
+    if (block.items.length < 2 || (block.columns ?? 1) > 1) return null
+    const heights = block.items.map(
+      (i) => heightOf(cx, textEl('m', `•  ${t(i, cx.lang)}`, TYPE.body.step), width),
+    )
+    return {
+      unitHeights: heights,
+      make: (from, to) => ({ ...block, items: block.items.slice(from, to) }),
+    }
+  }
+
+  if (block.kind === 'defList') {
+    if (block.rows.length < 2) return null
+    const heights = block.rows.map(
+      (_, i) => compile(cx, { ...block, rows: [block.rows[i]] }).height,
+    )
+    return {
+      unitHeights: heights,
+      make: (from, to) => ({ ...block, rows: block.rows.slice(from, to) }),
+    }
+  }
+
+  // links: the title stays with the head.
+  if (block.kind !== 'links' || block.items.length < 2) return null
+  const whole = compile(cx, block).height
+  const first = compile(cx, { ...block, items: block.items.slice(0, 1) }).height
+  const per = (whole - first) / Math.max(1, block.items.length - 1)
+  return {
+    unitHeights: block.items.map((_, i) => (i === 0 ? first : per)),
+    make: (from, to) => ({
+      ...block,
+      title: from === 0 ? block.title : '',
+      items: block.items.slice(from, to),
+    }),
+  }
 }
 
-/** The lines a splittable block wrapped into, for deciding where to break it. */
-function linesOf(env: PageEnv, block: Block, el: TextElement, width: number): string[] {
-  if (block.kind === 'list') return block.items
-  const size = env.shortEdge * typeStepFor(env.format, el.step)
-  return measureParagraph(env.ctx, el.text, size, width, 0).lines
-}
+/** Minimum units a split may leave behind or carry forward. */
+const ORPHANS = 2
+const WIDOWS = 2
 
 // ---------------------------------------------------------------------------
 // Pagination
 // ---------------------------------------------------------------------------
 
-/** Minimum lines a split may leave behind or carry forward. */
-const ORPHANS = 2
-const WIDOWS = 2
-
 export interface FlowOptions {
   /** Page number of the section's first page, for the folio. */
   startFolio?: number
+  lang?: Lang
 }
 
 /**
@@ -127,8 +398,8 @@ export interface FlowOptions {
  *
  * Greedy with break penalties rather than Knuth–Plass: an editorial report wants
  * predictable breaks it can override, not globally optimal ones it cannot
- * explain. Headings hold onto what follows; paragraphs and lists split with
- * orphan and widow control; everything else is atomic.
+ * explain. Headings hold onto what follows; paragraphs, lists and definition
+ * lists split with orphan and widow control; everything else is atomic.
  */
 export function flowSection(
   section: FlowSection,
@@ -149,11 +420,11 @@ export function flowSection(
 
   const margin = MARGIN * format.w
   const gap = BLOCK_GAP * format.w
-  // The band the running head and its rule occupy, below which content starts.
   const headBand = env.shortEdge * typeStepFor(format, TYPE.runningHead.step) * 2.4
   const top = margin + headBand
   const bottom = format.h - margin
   const width = format.w - margin * 2
+  const cx: Ctx = { env, format, lang: opts.lang ?? 'en', width, gap }
 
   const pages: RenderPage[] = []
   let items: RenderItem[] = []
@@ -163,25 +434,29 @@ export function flowSection(
     pages.push({
       id: `${section.id}#${pages.length}`,
       paletteId: section.paletteId,
-      items: [...furniture(env, section, (opts.startFolio ?? 1) + pages.length, format), ...items],
+      items: [...furniture(env, section, (opts.startFolio ?? 1) + pages.length, format, cx.lang), ...items],
     })
     items = []
     cursor = top
   }
 
-  const place = (piece: Piece): void => {
-    items.push({
-      kind: 'framed',
-      el: piece.el,
-      blockId: piece.blockId,
-      source: 'flow',
-      frame: {
-        col: 0,
-        colSpan: format.cols,
-        yFrac: cursor / format.h,
-        hFrac: piece.height / format.h,
-      },
-    })
+  const place = (piece: Piece, blockId: BlockId): void => {
+    for (const part of piece.parts) {
+      items.push({
+        kind: 'framed',
+        el: part.el,
+        blockId,
+        source: 'flow',
+        frame: {
+          col: part.col,
+          colSpan: part.colSpan,
+          xFrac: part.xFrac,
+          wFrac: part.wFrac,
+          yFrac: (cursor + part.dy) / format.h,
+          hFrac: part.h / format.h,
+        },
+      })
+    }
     cursor += piece.height + gap
   }
 
@@ -189,64 +464,66 @@ export function flowSection(
 
   while (queue.length) {
     const block = queue.shift()!
-    const el = textFor(block, format)
-    const measured = measureText(env, el, width)
-    const height = measured.height
-    const room = bottom - cursor
 
     if (block.breakBefore && items.length) flush()
 
-    if (height <= room) {
-      // Fits. Hold a heading back if nothing can follow it on this page.
-      if (keepsWithNext(block) && queue.length && bottom - (cursor + height + gap) <= 0 && items.length) {
-        flush()
-      }
-      place({ el, blockId: block.id, height, keepWithNext: keepsWithNext(block) })
-      continue
-    }
+    const piece = compile(cx, block)
+    const room = bottom - cursor
 
-    if (!isSplittable(block)) {
-      // Atomic and too tall: move it to a fresh page, or accept the overflow if
-      // it cannot fit on one at all. Overflowing beats looping forever.
-      if (items.length) {
+    if (piece.height <= room) {
+      // Fits. Hold a heading back if nothing could follow it on this page.
+      if (keepsWithNext(block) && queue.length && cursor + piece.height + gap >= bottom && items.length) {
         flush()
-        queue.unshift(block)
+        place(compile(cx, block), block.id)
       } else {
-        place({ el, blockId: block.id, height, keepWithNext: false })
-        flush()
+        place(piece, block.id)
       }
       continue
     }
 
-    // Split: fit as many whole lines as the remaining room allows.
-    const lines = linesOf(env, block, el, width)
-    const perLine = height / Math.max(1, lines.length)
-    const fits = Math.floor(room / perLine)
-
-    if (fits < ORPHANS || lines.length - fits < WIDOWS) {
-      // Not enough of it would stay behind (or carry forward) to be worth
-      // splitting — move the whole block on.
-      if (items.length) {
-        flush()
-        queue.unshift(block)
-      } else {
-        place({ el, blockId: block.id, height, keepWithNext: false })
-        flush()
+    const plan = splitPlan(cx, block)
+    let fits = 0
+    if (plan) {
+      let acc = 0
+      for (const h of plan.unitHeights) {
+        if (acc + h > room) break
+        acc += h
+        fits++
       }
-      continue
+      if (fits < ORPHANS || plan.unitHeights.length - fits < WIDOWS) fits = 0
     }
 
-    const head = withText(block, lines.slice(0, fits))
-    const tail = withText(block, lines.slice(fits))
-    const headEl = textFor(head, format)
-    place({
-      el: headEl,
-      blockId: block.id,
-      height: measureText(env, headEl, width).height,
-      keepWithNext: false,
-    })
-    flush()
-    queue.unshift(tail)
+    if (plan && fits > 0) {
+      // Confirm the *compiled* head fits rather than trusting the per-unit
+      // estimate. Estimates are approximations by nature — a paragraph's fixed
+      // ascent/descent overhead does not divide evenly by line count — and an
+      // unverified one puts content past the bottom margin, which looks like a
+      // slightly full page rather than a bug.
+      let head = plan.make(0, fits)
+      let headPiece = compile(cx, head)
+      while (headPiece.height > room && fits > ORPHANS) {
+        fits--
+        head = plan.make(0, fits)
+        headPiece = compile(cx, head)
+      }
+      if (headPiece.height <= room && plan.unitHeights.length - fits >= WIDOWS) {
+        place(headPiece, block.id)
+        flush()
+        queue.unshift(plan.make(fits, plan.unitHeights.length))
+        continue
+      }
+      // Shrinking it far enough would leave an orphan; move the whole block on.
+    }
+
+    // Atomic, or not worth splitting: move it to a fresh page. If it cannot fit
+    // on an empty page either, place it anyway — overflowing beats looping.
+    if (items.length) {
+      flush()
+      queue.unshift(block)
+    } else {
+      place(piece, block.id)
+      flush()
+    }
   }
 
   if (items.length || !pages.length) flush()
@@ -270,11 +547,11 @@ function furniture(
   section: FlowSection,
   folio: number,
   format: PageFormat,
+  lang: Lang,
 ): RenderItem[] {
   const margin = MARGIN * format.w
-  const width = format.w - margin * 2
   const headSize = env.shortEdge * typeStepFor(format, TYPE.runningHead.step)
-  const ruleH = Math.max(1, format.w / 1190) // 1pt at the reference page
+  const ruleH = Math.max(1, format.w / 1190)
 
   const frame = (y: number, h: number): Frame => ({
     col: 0,
@@ -309,9 +586,8 @@ function furniture(
     el: { kind: 'block', id: `${id}@${folio}`, box: EMPTY_BOX, locked: true, bg: 'ink' },
   })
 
-  void width
   return [
-    text('runhead', section.title?.toUpperCase() ?? '', 'left', margin),
+    text('runhead', t(section.title, lang).toUpperCase(), 'left', margin),
     text('folio', String(folio), 'right', margin),
     rule('rule-top', margin + headSize * 1.4),
     rule('rule-bottom', format.h - margin),

@@ -1,4 +1,5 @@
 import { OUTLINE_COLOR, TEXT_COLOR } from '../core/config/constants'
+import { CHART_COLORS } from '../config/brand'
 import { getPalette } from '../core/config/palettes'
 import type { Palette } from '../core/types'
 import type { BgRole, Deck } from '../doc/types'
@@ -99,5 +100,8 @@ export function colorOf(env: PageEnv, role: BgRole): string | null {
       return TEXT_COLOR
     case 'none':
       return null
+    default:
+      // chart1..chart6 — a categorical series colour.
+      return CHART_COLORS[Number(role.slice(5)) - 1] ?? CHART_COLORS[0]
   }
 }

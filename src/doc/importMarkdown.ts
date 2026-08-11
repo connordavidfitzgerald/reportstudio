@@ -1,4 +1,5 @@
 import { blockId, type Block } from './blocks'
+import { t } from './localized'
 
 /**
  * Turn pasted Markdown — or a Google Doc pasted as plain text — into blocks.
@@ -169,7 +170,7 @@ export function importSectionsMarkdown(source: string): { sections: { title: str
   for (const block of blocks) {
     if (block.kind === 'heading' || !sections.length) {
       sections.push({
-        title: block.kind === 'heading' ? block.text : 'Untitled',
+        title: block.kind === 'heading' ? t(block.text, 'en') : 'Untitled',
         blocks: [],
       })
     }

@@ -37,13 +37,23 @@ export interface Frame {
   colSpan: number
   yFrac: number
   hFrac: number
+  /**
+   * Sub-column horizontal override, as fractions of page width.
+   *
+   * The one deliberate exception to "horizontal is grid-exact": a chart bar's
+   * width *is* its value, so snapping it to a column line would misreport the
+   * data. Nothing else should use this — if a layout wants an off-grid edge for
+   * aesthetic reasons, that is what the grid is there to prevent.
+   */
+  xFrac?: number
+  wFrac?: number
 }
 
 /** The only place a {@link Frame} becomes pixels. */
 export const frameRect = (g: Grid, f: Frame, h: number): Rect => ({
-  x: g.colX(f.col),
+  x: f.xFrac === undefined ? g.colX(f.col) : g.margin + f.xFrac * g.inner.w,
   y: f.yFrac * h,
-  w: g.span(f.colSpan),
+  w: f.wFrac === undefined ? g.span(f.colSpan) : f.wFrac * g.inner.w,
   h: f.hFrac * h,
 })
 

@@ -2,6 +2,7 @@ import type { HalftoneParams, TextAlign } from '../core/types'
 import type { ImageRef } from '../core/imageStore'
 import type { FormatId } from '../config/formats'
 import type { Section } from './sections'
+import type { Lang } from './localized'
 
 /**
  * A grid box — the *only* positional state an element has. There are no pixel
@@ -36,7 +37,20 @@ export type TextVariant = 'header' | 'badge' | 'paragraph' | 'plain'
  * A background colour named by its *role* in the palette rather than by hex, so
  * changing the deck's palette restyles every page at once.
  */
-export type BgRole = 'outline' | 'secondary' | 'highlight' | 'background' | 'ink' | 'none'
+export type BgRole =
+  | 'outline'
+  | 'secondary'
+  | 'highlight'
+  | 'background'
+  | 'ink'
+  | 'none'
+  /** Categorical chart series, indexed into `CHART_COLORS`. */
+  | 'chart1'
+  | 'chart2'
+  | 'chart3'
+  | 'chart4'
+  | 'chart5'
+  | 'chart6'
 
 export interface TextElement extends ElementBase {
   kind: 'text'
@@ -97,6 +111,11 @@ export interface Page {
 
 export interface Deck {
   format: FormatId
+  /**
+   * Which language edition is being typeset. One layout, two PDFs — see
+   * `doc/localized.ts`.
+   */
+  lang: Lang
   paletteId: string
   /** Active paper textures, layered in order. Empty = none. */
   paperIds: string[]

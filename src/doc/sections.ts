@@ -1,5 +1,6 @@
 import type { Deck, Page } from './types'
 import type { Block } from './blocks'
+import type { LocalizedText } from './localized'
 import type { RenderPage } from '../render/page'
 import { toRenderPage } from '../render/page'
 import { flowSection } from '../render/flow'
@@ -33,7 +34,7 @@ export interface FlowSection {
   kind: 'flow'
   id: string
   /** Becomes the running head on every page the section occupies. */
-  title?: string
+  title?: LocalizedText
   paletteId?: string
   blocks: Block[]
 }
@@ -69,6 +70,7 @@ export function deckPages(deck: Deck): RenderPage[] {
       pages.push(
         ...flowSection(section, deck, measureCtx(), renderAssetsForMeasuring(), {
           startFolio: pages.length + 1,
+          lang: deck.lang,
         }),
       )
     }

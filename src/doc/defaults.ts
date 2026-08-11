@@ -128,6 +128,7 @@ export function createFlowSection(title = 'Section'): FlowSection {
 export function createDeck(format: FormatId = 'slide'): Deck {
   return {
     format,
+    lang: 'en',
     paletteId: PALETTES[0].id,
     paperIds: [...DEFAULT_PAPER_IDS],
     paperOpacities: Object.fromEntries(
