@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { LOGO } from '../core/config/constants'
+import { LOGO } from '../core/config/logo'
 import { useImage } from '../core/hooks/useImage'
 import { usePaperImages } from '../core/hooks/usePaperImages'
 import { getImage } from '../doc/imageCache'

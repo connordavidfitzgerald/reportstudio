@@ -87,9 +87,12 @@ export const PAGE_FORMATS: PageFormat[] = [
   {
     id: 'a4',
     label: 'Report',
-    // A4 at 150dpi, so a 2× export is a true 300dpi. Content box 515 × 762pt.
-    w: 1240,
-    h: 1754,
+    // Exactly 2× the point size (144dpi), so ptW/w and ptH/h are identical and
+    // the page cannot end up subtly stretched — see `checkFormatProportions`.
+    // 1240 × 1754 (a nominal 150dpi) is 0.04% off square and was doing exactly
+    // that. A 2× export is 288dpi, near enough to 300 for print.
+    w: 1190,
+    h: 1684,
     // 12 columns across the 515pt content box. Halves, thirds, quarters and the
     // 5/7 term|definition split of the definition-list pages all land on lines.
     cols: 12,
@@ -127,6 +130,20 @@ export const PAGE_FORMATS: PageFormat[] = [
 
 export const getFormat = (id: FormatId): PageFormat =>
   PAGE_FORMATS.find((f) => f.id === id) ?? PAGE_FORMATS[0]
+
+/**
+ * Every format's render size must be exactly proportional to its PDF page size.
+ *
+ * The vector exporter maps canvas pixels to points with a single uniform scale,
+ * and `drawSvgPath` can only take one. If `ptW/w` and `ptH/h` disagree, the whole
+ * page is stretched on one axis — by an amount small enough to look plausible in
+ * a thumbnail and wrong on paper. Checked in `scripts/check-pdfgfx.mjs`.
+ */
+export function formatProportionError(f: PageFormat): number {
+  const sx = f.ptW / f.w
+  const sy = f.ptH / f.h
+  return Math.abs(sx - sy) / sx
+}
 
 /**
  * The modular type scale, re-based *and* re-ratioed per format. Step 0 moves

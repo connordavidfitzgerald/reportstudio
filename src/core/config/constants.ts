@@ -1,5 +1,4 @@
 import type { HalftoneParams } from "../types";
-import logo from "../../assets/logo.webp";
 
 /** The fixed brand pink — the notched outline / swash fill. */
 export const OUTLINE_COLOR = "#FF669E";
@@ -68,12 +67,6 @@ export const CATEGORY_SIZE_RATIO = typeStep(1);
 
 /** Grid: 10 columns, no margin, no gutter. */
 export const GRID_COLUMNS = 10;
-
-/** Brand logo. `src` is the bundled image URL; `fallbackText` renders if it fails to load. */
-export const LOGO = {
-  src: logo as string,
-  fallbackText: "◆ STUDIO",
-};
 
 export const DEFAULT_HALFTONE: HalftoneParams = {
   dotScale: 3,

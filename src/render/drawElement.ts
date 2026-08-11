@@ -1,4 +1,5 @@
-import { LOGO, PAD_RATIO } from '../core/config/constants'
+import { PAD_RATIO } from '../core/config/constants'
+import { LOGO } from '../core/config/logo'
 import {
   drawFittedParagraphs,
   drawHeaderBlock,
