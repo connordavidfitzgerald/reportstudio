@@ -1,7 +1,8 @@
 import { OUTLINE_COLOR } from '../core/config/constants'
 import { getPalette } from '../core/config/palettes'
 import type { Palette } from '../core/types'
-import type { BgRole, Deck, Page } from '../doc/types'
+import type { BgRole, Deck } from '../doc/types'
+import type { RenderPage } from './page'
 import { getFormat, typeStepFor, type PageFormat } from '../config/formats'
 import { grid, type Grid } from './grid'
 
@@ -24,7 +25,7 @@ export type Quality = 'full' | 'thumb'
 /** Everything needed to lay out or draw one page. */
 export interface PageEnv {
   ctx: CanvasRenderingContext2D
-  page: Page
+  page: RenderPage
   deck: Deck
   format: PageFormat
   palette: Palette
@@ -53,7 +54,7 @@ export interface PageEnvOptions {
 
 export function buildPageEnv(
   ctx: CanvasRenderingContext2D,
-  page: Page,
+  page: RenderPage,
   deck: Deck,
   w: number,
   h: number,

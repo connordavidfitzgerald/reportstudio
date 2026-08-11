@@ -1,6 +1,7 @@
 import { getPaper } from '../core/config/papers'
 import { drawPaper } from '../core/paper'
 import type { Deck, Page } from '../doc/types'
+import { toRenderPage, type RenderPage } from './page'
 import { drawElement } from './drawElement'
 import { buildPageEnv, type PageEnvOptions, type RenderAssets } from './env'
 import { layoutPage, type Placed } from './layoutPage'
@@ -12,14 +13,17 @@ import { layoutPage, type Placed } from './layoutPage'
  */
 export function renderPage(
   ctx: CanvasRenderingContext2D,
-  page: Page,
+  page: Page | RenderPage,
   deck: Deck,
   w: number,
   h: number,
   assets: RenderAssets,
   opts: PageEnvOptions = {},
 ): Placed[] {
-  const env = buildPageEnv(ctx, page, deck, w, h, assets, opts)
+  // Accepts a document page for convenience — every current caller has one —
+  // and normalises it. `toRenderPage` is memoised, so identity is preserved.
+  const rp = 'items' in page ? page : toRenderPage(page)
+  const env = buildPageEnv(ctx, rp, deck, w, h, assets, opts)
 
   // 1. Background
   ctx.save()
@@ -27,7 +31,7 @@ export function renderPage(
   ctx.fillRect(0, 0, w, h)
   ctx.restore()
 
-  // 2. Elements, in array order — later elements sit on top.
+  // 2. Items, in array order — later items sit on top.
   const placed = layoutPage(env)
   for (const p of placed) drawElement(env, p)
 

@@ -10,7 +10,9 @@
     "optimize:assets": "node scripts/optimize-assets.mjs",
     "preview": "vite preview",
     "spike:pdf": "node scripts/spike-pdf.mjs",
-    "check:migrations": "node scripts/check-migrations.mjs"
+    "check:migrations": "node scripts/check-migrations.mjs",
+    "check:geometry": "node scripts/check-geometry.mjs",
+    "check": "npm run check:migrations && npm run check:geometry"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",

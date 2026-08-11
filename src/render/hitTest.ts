@@ -33,7 +33,7 @@ export function handlePoint(r: Rect, h: Handle): { x: number; y: number } {
 export function hitTest(placed: Placed[], x: number, y: number): Placed | null {
   for (let i = placed.length - 1; i >= 0; i--) {
     const p = placed[i]
-    if (p.el.locked) continue
+    if (p.el.locked || p.source === 'furniture') continue
     // Hit-test the painted rect, not the grid box: what you can see is what you
     // can grab, even where an auto-height text block is shorter than its cell.
     if (pointInRect(x, y, p.rect)) return p
@@ -55,6 +55,7 @@ export function marquee(placed: Placed[], r: Rect): Placed[] {
   return placed.filter(
     (p) =>
       !p.el.locked &&
+      p.source !== 'furniture' &&
       p.rect.x < r.x + r.w &&
       p.rect.x + p.rect.w > r.x &&
       p.rect.y < r.y + r.h &&

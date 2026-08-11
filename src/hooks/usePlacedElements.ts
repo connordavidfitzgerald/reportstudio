@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { getFormat } from '../config/formats'
 import type { Deck, Page } from '../doc/types'
 import { buildPageEnv, type RenderAssets } from '../render/env'
+import { toRenderPage } from '../render/page'
 import { layoutPage, type Placed } from '../render/layoutPage'
 
 /**
@@ -36,7 +37,7 @@ export function usePlacedElements(
   return useMemo(() => {
     if (!fontsReady) return []
     const f = getFormat(deck.format)
-    const env = buildPageEnv(scratchCtx(), page, deck, f.w, f.h, assets)
+    const env = buildPageEnv(scratchCtx(), toRenderPage(page), deck, f.w, f.h, assets)
     return layoutPage(env)
   }, [page, deck, assets, fontsReady])
 }

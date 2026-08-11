@@ -1,4 +1,3 @@
-import { GRID_COLUMNS } from '../core/config/constants'
 import type { Rect } from '../core/types'
 import type { Box } from '../doc/types'
 
@@ -20,7 +19,7 @@ const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.m
  * *background* rather than an element, so the colour still bleeds while the type
  * sits inside the margin.
  */
-export function grid(w: number, h: number, cols = GRID_COLUMNS, rows = 12, margin = 0) {
+export function grid(w: number, h: number, cols: number, rows: number, margin = 0) {
   const innerW = w - margin * 2
   const innerH = h - margin * 2
   const colW = innerW / cols

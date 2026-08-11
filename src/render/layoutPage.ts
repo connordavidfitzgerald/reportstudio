@@ -9,6 +9,7 @@ import { fitHeader } from '../core/text/autofit'
 import type { Rect } from '../core/types'
 import type { PageElement, TextElement } from '../doc/types'
 import { sizeOf, type PageEnv } from './env'
+import { frameRect, type ItemSource } from './page'
 
 /**
  * One element resolved to pixels.
@@ -24,6 +25,10 @@ export interface Placed {
   rect: Rect
   /** Text only: everything the draw pass would otherwise have to re-derive. */
   text?: TextLayout
+  /** Where this came from — what the editor branches on. See `render/page.ts`. */
+  source: ItemSource
+  /** Flowed items only: the content block this fragment belongs to. */
+  blockId?: string
 }
 
 export interface TextLayout {
@@ -128,36 +133,47 @@ function offsetFor(vAlign: TextElement['vAlign'], boxH: number, height: number):
 }
 
 /**
- * Resolve every element on a page to pixels.
+ * Resolve every item on a page to pixels.
  *
  * Pure, and deliberately separate from painting: the editor gets its hit-test
  * geometry by calling this directly, so what you can click is by construction
  * what got drawn. The poster app achieved the same guarantee with a `collect`
  * callback threaded through the draw functions — unnecessary once geometry is
  * something a function returns rather than a side effect of painting.
+ *
+ * Boxed and framed items differ only in where their rectangle comes from; text
+ * measurement, alignment and drawing are identical afterwards. That is the whole
+ * point — flowed content is not a second rendering path.
  */
 export function layoutPage(env: PageEnv): Placed[] {
   const { g } = env
-  return env.page.elements.map((el) => {
-    const cellRect = g.rect(el.box)
+  return env.page.items.map((item) => {
+    const { el, source } = item
+    const blockId = item.kind === 'framed' ? item.blockId : undefined
+
+    // A framed item's vertical placement is already decided by the flow, so its
+    // height is authoritative and `autoHeight` does not apply — the paginator
+    // measured it to work out where the next thing goes.
+    const framed = item.kind === 'framed'
+    const cellRect = framed ? frameRect(g, item.frame, env.h) : g.rect(el.box)
 
     if (isText(el)) {
       const text = measureText(env, el, cellRect.w)
       // An auto-height box is as tall as its content, snapped up to whole rows so
       // it still reads as a grid box; a fixed one keeps the height the user set.
-      const boxH = el.autoHeight ? g.vspan(g.rowsFor(text.height)) : cellRect.h
+      const boxH = framed ? cellRect.h : el.autoHeight ? g.vspan(g.rowsFor(text.height)) : cellRect.h
       const rect: Rect = {
         x: cellRect.x,
-        y: cellRect.y + offsetFor(el.vAlign, boxH, text.height),
+        y: cellRect.y + offsetFor(framed ? 'top' : el.vAlign, boxH, text.height),
         w: text.width || cellRect.w,
         h: text.height,
       }
       // Fitted text is only as wide as its widest line; align it within the box.
       if (el.align === 'center') rect.x = cellRect.x + (cellRect.w - rect.w) / 2
       else if (el.align === 'right') rect.x = cellRect.x + cellRect.w - rect.w
-      return { el, cellRect: { ...cellRect, h: boxH }, rect, text }
+      return { el, cellRect: { ...cellRect, h: boxH }, rect, text, source, blockId }
     }
 
-    return { el, cellRect, rect: cellRect }
+    return { el, cellRect, rect: cellRect, source, blockId }
   })
 }
