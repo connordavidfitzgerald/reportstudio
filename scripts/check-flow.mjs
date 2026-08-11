@@ -270,4 +270,65 @@ const furnitureOf = (page) => page.items.filter((i) => i.source === 'furniture')
   assert.ok(bodyOf(fr, 'u').includes('Untranslated'), 'plain strings serve both editions')
 }
 
-console.log('flow ok — furniture, folios, breaks, keep-with-next, splitting, structured kinds, charts, bilingual')
+
+// -- overrides ---------------------------------------------------------------
+{
+  const el = { kind: 'block', id: 'pin1', box: { col: 0, row: 40, colSpan: 12, rowSpan: 8 }, bg: 'highlight' }
+  const blocks = Array.from({ length: 20 }, (_, i) => ({ id: `p${i}`, kind: 'para', text: words(40) }))
+
+  // A pin anchored to a block lands on that block's page, and follows it when
+  // upstream content grows.
+  const withPin = (extra) =>
+    flowSection(
+      {
+        kind: 'flow',
+        id: 's',
+        title: 'T',
+        blocks: [...Array.from({ length: extra }, (_, i) => ({ id: `x${i}`, kind: 'para', text: words(40) })), ...blocks],
+        overrides: [{ kind: 'pin', id: 'o1', anchor: { at: 'block', blockId: 'p15' }, element: el, obstruct: 'none' }],
+      },
+      deck,
+      stubCtx(),
+      ASSETS,
+      {},
+    )
+
+  const pageOfPin = (pages) => pages.findIndex((p) => p.items.some((i) => i.source === 'pinned'))
+  const pageOfBlock = (pages, id) =>
+    pages.findIndex((p) => p.items.some((i) => i.blockId === id))
+
+  const a = withPin(0)
+  assert.ok(pageOfPin(a) >= 0, 'a pin is placed')
+  assert.equal(pageOfPin(a), pageOfBlock(a, 'p15'), 'the pin lands on its anchor block’s page')
+
+  const b = withPin(8)
+  assert.ok(pageOfBlock(b, 'p15') > pageOfBlock(a, 'p15'), 'upstream text pushed the block later')
+  assert.equal(pageOfPin(b), pageOfBlock(b, 'p15'), 'and the pin followed it, rather than holding a page number')
+}
+
+// A banded pin takes space away from the flow on its page.
+{
+  const band = { kind: 'block', id: 'pin2', box: { col: 0, row: 40, colSpan: 12, rowSpan: 12 }, bg: 'highlight' }
+  const blocks = Array.from({ length: 20 }, (_, i) => ({ id: `p${i}`, kind: 'para', text: words(40) }))
+  const mk = (obstruct) =>
+    flowSection(
+      { kind: 'flow', id: 's', title: 'T', blocks,
+        overrides: [{ kind: 'pin', id: 'o', anchor: { at: 'ordinal', ordinal: 0 }, element: band, obstruct }] },
+      deck, stubCtx(), ASSETS, {},
+    )
+  const free = mk('none')
+  const banded = mk('band')
+  const contentOnFirst = (pages) => pages[0].items.filter((i) => i.source === 'flow').length
+  assert.ok(
+    contentOnFirst(banded) < contentOnFirst(free),
+    'a banded pin pushes flowed content off its page',
+  )
+  const F2 = getFormat('a4')
+  const bandTop = (40 / F2.rows) * (F2.h - 2 * MARGIN * F2.w) + MARGIN * F2.w
+  for (const item of banded[0].items.filter((i) => i.source === 'flow')) {
+    const end = (item.frame.yFrac + item.frame.hFrac) * F2.h
+    assert.ok(end <= bandTop + 0.5, `flowed content stops above the band (${end} vs ${bandTop})`)
+  }
+}
+
+console.log('flow ok — furniture, folios, breaks, keep-with-next, splitting, structured kinds, charts, bilingual, overrides')

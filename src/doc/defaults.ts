@@ -125,6 +125,64 @@ export function createFlowSection(title = 'Section'): FlowSection {
   }
 }
 
+/**
+ * Flow-section presets.
+ *
+ * `conclusion` and `appendix` are the two archetypes the Figma redesign stops
+ * short of, so they are *designed* from the system's own parts rather than
+ * transcribed: a conclusion is a lede plus ruled sub-sections, an appendix is a
+ * definition list and a resources block.
+ */
+export const FLOW_PRESETS: { id: string; label: string; make: () => FlowSection }[] = [
+  {
+    id: 'chapter',
+    label: 'Chapter',
+    make: () => createFlowSection('Section'),
+  },
+  {
+    id: 'conclusion',
+    label: 'Conclusion',
+    make: () => ({
+      kind: 'flow',
+      id: pageId(),
+      title: 'Conclusion',
+      blocks: [
+        { id: blockId(), kind: 'heading', text: 'Conclusion' },
+        { id: blockId(), kind: 'lede', text: 'What the findings add up to, in a paragraph.' },
+        { id: blockId(), kind: 'subhead', text: 'Considerations for funders' },
+        { id: blockId(), kind: 'para', text: '', indent: false },
+        { id: blockId(), kind: 'subhead', text: 'Localized support' },
+        { id: blockId(), kind: 'para', text: '', indent: false },
+        { id: blockId(), kind: 'subhead', text: 'Movement-wide support' },
+        { id: blockId(), kind: 'para', text: '', indent: false },
+      ],
+    }),
+  },
+  {
+    id: 'appendix',
+    label: 'Appendix',
+    make: () => ({
+      kind: 'flow',
+      id: pageId(),
+      title: 'Appendix & questions',
+      blocks: [
+        { id: blockId(), kind: 'heading', text: 'Appendix' },
+        {
+          id: blockId(),
+          kind: 'defList',
+          rows: [{ term: 'Interview question', def: 'The question as it was asked.' }],
+        },
+        {
+          id: blockId(),
+          kind: 'links',
+          title: 'Resources',
+          items: [{ label: 'A resource', href: '' }],
+        },
+      ],
+    }),
+  },
+]
+
 export function createDeck(format: FormatId = 'slide'): Deck {
   return {
     format,

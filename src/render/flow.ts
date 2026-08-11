@@ -10,6 +10,8 @@ import type { BgRole, Deck, PageElement, TextElement } from '../doc/types'
 import { buildPageEnv, type PageEnv, type RenderAssets } from './env'
 import { measureText } from './layoutPage'
 import type { Frame, RenderItem, RenderPage } from './page'
+import { grid } from './grid'
+import type { Override } from '../doc/overrides'
 
 /**
  * Pagination: a stream of blocks in, a list of pages out.
@@ -401,13 +403,30 @@ export interface FlowOptions {
  * explain. Headings hold onto what follows; paragraphs, lists and definition
  * lists split with orphan and widow control; everything else is atomic.
  */
-export function flowSection(
+/**
+ * A horizontal band a pinned element occupies on a given page, which flowed text
+ * must not run into.
+ */
+interface Obstruction {
+  page: number
+  top: number
+  bottom: number
+}
+
+interface Pass {
+  pages: RenderPage[]
+  /** Page index (within the section) of each block's first fragment. */
+  blockPage: Map<BlockId, number>
+}
+
+function flowPass(
   section: FlowSection,
   deck: Deck,
   metrics: CanvasRenderingContext2D,
   assets: RenderAssets,
-  opts: FlowOptions = {},
-): RenderPage[] {
+  opts: FlowOptions,
+  obstructions: Obstruction[],
+): Pass {
   const format = getFormat(deck.format)
   const env = buildPageEnv(
     metrics,
@@ -427,8 +446,29 @@ export function flowSection(
   const cx: Ctx = { env, format, lang: opts.lang ?? 'en', width, gap }
 
   const pages: RenderPage[] = []
+  const blockPage = new Map<BlockId, number>()
   let items: RenderItem[] = []
-  let cursor = top
+
+  /**
+   * The usable vertical band on a page, after any pinned obstruction.
+   *
+   * A band at the top pushes content down; one at the bottom stops it short.
+   * Deliberately not a shaped runaround — the brand has none.
+   */
+  const regionOf = (page: number): { top: number; bottom: number } => {
+    let a = top
+    let b = bottom
+    for (const o of obstructions) {
+      if (o.page !== page) continue
+      const midway = (o.top + o.bottom) / 2 < (top + bottom) / 2
+      if (midway) a = Math.max(a, o.bottom)
+      else b = Math.min(b, o.top)
+    }
+    return { top: a, bottom: b }
+  }
+
+  let region = regionOf(0)
+  let cursor = region.top
 
   const flush = (): void => {
     pages.push({
@@ -437,10 +477,12 @@ export function flowSection(
       items: [...furniture(env, section, (opts.startFolio ?? 1) + pages.length, format, cx.lang), ...items],
     })
     items = []
-    cursor = top
+    region = regionOf(pages.length)
+    cursor = region.top
   }
 
   const place = (piece: Piece, blockId: BlockId): void => {
+    if (!blockPage.has(blockId)) blockPage.set(blockId, pages.length)
     for (const part of piece.parts) {
       items.push({
         kind: 'framed',
@@ -468,11 +510,11 @@ export function flowSection(
     if (block.breakBefore && items.length) flush()
 
     const piece = compile(cx, block)
-    const room = bottom - cursor
+    const room = region.bottom - cursor
 
     if (piece.height <= room) {
       // Fits. Hold a heading back if nothing could follow it on this page.
-      if (keepsWithNext(block) && queue.length && cursor + piece.height + gap >= bottom && items.length) {
+      if (keepsWithNext(block) && queue.length && cursor + piece.height + gap >= region.bottom && items.length) {
         flush()
         place(compile(cx, block), block.id)
       } else {
@@ -527,7 +569,94 @@ export function flowSection(
   }
 
   if (items.length || !pages.length) flush()
-  return pages
+  return { pages, blockPage }
+}
+
+/**
+ * Typeset a section, honouring its overrides.
+ *
+ * Pinned elements create a circularity: a pin's page depends on where its anchor
+ * block landed, and where blocks land depends on the space a pin takes up.
+ * Resolved by bounded iteration, the way InDesign and TeX's page builder do —
+ * flow unobstructed, resolve the pins, re-flow with those obstructions, and stop
+ * when the assignment stops changing or after {@link MAX_PASSES}. Freezing on
+ * non-convergence is deterministic, which matters more than being optimal.
+ */
+const MAX_PASSES = 3
+
+export function flowSection(
+  section: FlowSection,
+  deck: Deck,
+  metrics: CanvasRenderingContext2D,
+  assets: RenderAssets,
+  opts: FlowOptions = {},
+): RenderPage[] {
+  const overrides = section.overrides ?? []
+  const format = getFormat(deck.format)
+  const g = grid(format.w, format.h, format.cols, format.rows, format.margin * format.w)
+
+  let pass = flowPass(section, deck, metrics, assets, opts, [])
+  if (!overrides.length) return pass.pages
+
+  const pinsOf = (p: Pass): { ov: Override; page: number }[] =>
+    overrides.flatMap((ov) => {
+      const page =
+        ov.anchor.at === 'ordinal' ? ov.anchor.ordinal : p.blockPage.get(ov.anchor.blockId)
+      return page === undefined || page < 0 ? [] : [{ ov, page }]
+    })
+
+  let resolved = pinsOf(pass)
+  for (let i = 1; i < MAX_PASSES; i++) {
+    const obstructions = resolved.flatMap(({ ov, page }) => {
+      if (ov.kind !== 'pin' || ov.obstruct !== 'band') return []
+      const r = g.rect(ov.element.box)
+      return [{ page, top: r.y, bottom: r.y + r.h }]
+    })
+    const next = flowPass(section, deck, metrics, assets, opts, obstructions)
+    const nextResolved = pinsOf(next)
+    const stable =
+      nextResolved.length === resolved.length &&
+      nextResolved.every((r, j) => r.page === resolved[j].page)
+    pass = next
+    resolved = nextResolved
+    if (stable) break
+  }
+
+  // Apply the resolved overrides onto their pages.
+  for (const { ov, page } of resolved) {
+    const target = pass.pages[Math.min(page, pass.pages.length - 1)]
+    if (!target) continue
+    if (ov.kind === 'pin') {
+      target.items = [...target.items, { kind: 'boxed', el: ov.element, source: 'pinned' }]
+    } else if (ov.paletteId) {
+      const from = ov.scope === 'from' ? page : -1
+      for (const [i, pg] of pass.pages.entries()) {
+        if (i === page || (from >= 0 && i >= from)) pg.paletteId = ov.paletteId
+      }
+    }
+  }
+
+  return pass.pages
+}
+
+/**
+ * Overrides that no longer resolve to a page — their anchor block is gone.
+ *
+ * Surfaced in the UI rather than deleted. See `doc/overrides.ts`.
+ */
+export function orphanedOverrides(
+  section: FlowSection,
+  deck: Deck,
+  metrics: CanvasRenderingContext2D,
+  assets: RenderAssets,
+  opts: FlowOptions = {},
+): Override[] {
+  const overrides = section.overrides ?? []
+  if (!overrides.length) return []
+  const { blockPage } = flowPass(section, deck, metrics, assets, opts, [])
+  return overrides.filter(
+    (ov) => ov.anchor.at === 'block' && blockPage.get(ov.anchor.blockId) === undefined,
+  )
 }
 
 // ---------------------------------------------------------------------------

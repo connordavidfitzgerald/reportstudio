@@ -1,6 +1,7 @@
 import type { Deck, Page } from './types'
 import type { Block } from './blocks'
 import type { LocalizedText } from './localized'
+import type { Override } from './overrides'
 import type { RenderPage } from '../render/page'
 import { toRenderPage } from '../render/page'
 import { flowSection } from '../render/flow'
@@ -37,6 +38,8 @@ export interface FlowSection {
   title?: LocalizedText
   paletteId?: string
   blocks: Block[]
+  /** Pins and page styling that survive re-flow — see `doc/overrides.ts`. */
+  overrides?: Override[]
 }
 
 export type Section = StaticSection | FlowSection

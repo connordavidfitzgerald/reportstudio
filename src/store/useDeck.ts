@@ -1,8 +1,9 @@
 import { create } from 'zustand'
 import { pruneImageBlobs } from '../core/imageStore'
 import { collectBlobIds } from '../doc/imageCache'
-import { createDeck, createFlowSection, createSection, pageId } from '../doc/defaults'
+import { createDeck, createFlowSection, createSection, FLOW_PRESETS, pageId } from '../doc/defaults'
 import type { Block } from '../doc/blocks'
+import { overrideId, repairAnchors, type Override } from '../doc/overrides'
 import type { Box, Deck, PageElement } from '../doc/types'
 import type { RenderPage } from '../render/page'
 import {
@@ -109,12 +110,16 @@ interface DeckStore {
 
   // Sections
   /** Append a flow section, and open its first page. */
-  addFlowSection: (title?: string) => void
+  addFlowSection: (preset?: string) => void
   /** Replace a flow section's stream — the import path. */
   setBlocks: (sectionId: string, blocks: Block[], tag?: string) => void
   /** Edit one block in place. Coalesced per block, so typing is one undo step. */
   setBlock: (sectionId: string, blockId: string, patch: Partial<Block>) => void
   removeBlock: (sectionId: string, blockId: string) => void
+  /** Pin an element onto the page a block landed on, out of the flow. */
+  addPin: (sectionId: string, anchorBlockId: string, element: PageElement) => void
+  removeOverride: (sectionId: string, overrideId: string) => void
+  setOverrides: (sectionId: string, overrides: Override[]) => void
   /** Move a block within its stream — the reorder gesture. */
   moveBlock: (sectionId: string, blockId: string, delta: number) => void
 
@@ -322,10 +327,11 @@ export const useDeck = create<DeckStore>((set, get) => ({
       })),
     ),
 
-  addFlowSection: (title) =>
+  addFlowSection: (preset) =>
     tagged('section:add', () =>
       set((s) => {
-        const section = createFlowSection(title)
+        const found = FLOW_PRESETS.find((p) => p.id === preset)
+        const section = found ? found.make() : createFlowSection()
         const sections = [...s.deck.sections, section]
         const deck = deepFreeze({ ...s.deck, sections })
         return { deck, currentPageId: deckPages(deck)[0].id, selectedIds: [] }
@@ -361,6 +367,55 @@ export const useDeck = create<DeckStore>((set, get) => ({
           mapFlow(s.deck, sectionId, (sec) => ({
             ...sec,
             blocks: sec.blocks.filter((b) => b.id !== id),
+            // Repair here, not in the flow engine: the surviving neighbours are
+            // known for free at deletion time and gone afterwards.
+            overrides: repairAnchors(
+              sec.blocks,
+              new Set([id]),
+              sec.overrides ?? [],
+              () => undefined,
+            ),
+          })),
+        ),
+      })),
+    ),
+
+  addPin: (sectionId, anchorBlockId, element) =>
+    tagged('override:pin', () =>
+      set((s) => ({
+        deck: deepFreeze(
+          mapFlow(s.deck, sectionId, (sec) => ({
+            ...sec,
+            overrides: [
+              ...(sec.overrides ?? []),
+              {
+                kind: 'pin' as const,
+                id: overrideId(),
+                anchor: { at: 'block' as const, blockId: anchorBlockId },
+                element,
+                obstruct: 'none' as const,
+              },
+            ],
+          })),
+        ),
+        selectedIds: [element.id],
+      })),
+    ),
+
+  setOverrides: (sectionId, overrides) =>
+    tagged('override:set', () =>
+      set((s) => ({
+        deck: deepFreeze(mapFlow(s.deck, sectionId, (sec) => ({ ...sec, overrides }))),
+      })),
+    ),
+
+  removeOverride: (sectionId, id) =>
+    tagged('override:remove', () =>
+      set((s) => ({
+        deck: deepFreeze(
+          mapFlow(s.deck, sectionId, (sec) => ({
+            ...sec,
+            overrides: (sec.overrides ?? []).filter((o) => o.id !== id),
           })),
         ),
       })),

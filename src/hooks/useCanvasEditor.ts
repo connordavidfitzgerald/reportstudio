@@ -101,7 +101,11 @@ export function useCanvasEditor(
     }
 
     // A handle on an already-selected element wins over anything beneath it.
+    // Flowed elements have none: their position is a *return value*, so offering
+    // a resize handle would be a lie the model cannot honour — the next upstream
+    // edit would move it again regardless.
     for (const p of selection) {
+      if (p.source === 'flow') continue
       const h = handleAt(p.cellRect, x, y, grab)
       if (h) {
         setBoth({ kind: 'resize', handle: h, id: p.el.id, box: p.el.box })
@@ -138,10 +142,14 @@ export function useCanvasEditor(
       // Hover feedback only.
       if (tool === 'text') return setCursor('text')
       for (const p of selection) {
+        if (p.source === 'flow') continue
         const h = handleAt(p.cellRect, x, y, grab)
         if (h) return setCursor(CURSORS[h])
       }
-      setCursor(hitTest(placed, x, y) ? 'move' : 'default')
+      const over = hitTest(placed, x, y)
+      // `text` rather than `move` over flowed content: it can be selected and
+      // edited in place, but not dragged.
+      setCursor(over ? (over.source === 'flow' ? 'text' : 'move') : 'default')
       return
     }
 
@@ -153,6 +161,10 @@ export function useCanvasEditor(
         setBoth({ kind: 'marquee', x0: cur.x0, y0: cur.y0 })
         return
       }
+      // Dragging flowed content is meaningless — nothing here owns its own
+      // position. Reordering happens in the outline; pinning is how something
+      // leaves the flow.
+      if (selection.some((p) => p.source === 'flow')) return
       const boxes: Record<string, Box> = {}
       for (const p of selection) boxes[p.el.id] = p.el.box
       setBoth({ kind: 'move', x0: cur.x0, y0: cur.y0, boxes })

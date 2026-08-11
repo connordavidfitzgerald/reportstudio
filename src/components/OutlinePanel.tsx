@@ -9,8 +9,11 @@ import {
   type LocalizedText,
 } from '../doc/localized'
 import { blockId } from '../doc/blocks'
+import { FLOW_PRESETS } from '../doc/defaults'
 import { importMarkdown } from '../doc/importMarkdown'
 import { isFlow, sectionOfPage } from '../doc/sections'
+import { orphanedOverrides } from '../render/flow'
+import { measureCtx, renderAssetsForMeasuring } from '../render/measureCtx'
 import { useCurrentPage, useDeck } from '../store/useDeck'
 import { Section as Panel, Segmented } from '../core/ui'
 
@@ -203,6 +206,8 @@ export function OutlinePanel() {
   const moveBlock = useDeck((s) => s.moveBlock)
   const addFlowSection = useDeck((s) => s.addFlowSection)
   const setDeck = useDeck((s) => s.setDeck)
+  const removeOverride = useDeck((s) => s.removeOverride)
+  const setOverrides = useDeck((s) => s.setOverrides)
 
   const [importing, setImporting] = useState(false)
   const [draft, setDraft] = useState('')
@@ -221,7 +226,7 @@ export function OutlinePanel() {
         </p>
         <button
           className="mt-2 w-full border border-black px-2 py-1 text-xs hover:bg-black hover:text-white"
-          onClick={() => addFlowSection('Section')}
+          onClick={() => addFlowSection('chapter')}
         >
           Add report section
         </button>
@@ -231,6 +236,17 @@ export function OutlinePanel() {
 
   const preview = importing ? importMarkdown(draft) : null
   const translated = flow.blocks.filter((b) => isFullyTranslated(translatableOf(b))).length
+  const orphans = orphanedOverrides(flow, deck, measureCtx(), renderAssetsForMeasuring(), {
+    lang,
+  })
+
+  const reanchor = (id: string, blockId: string): void =>
+    setOverrides(
+      flow.id,
+      (flow.overrides ?? []).map((o) =>
+        o.id === id ? { ...o, anchor: { at: 'block' as const, blockId } } : o,
+      ),
+    )
 
   return (
     <Panel title="Outline" collapsible defaultOpen>
@@ -297,12 +313,18 @@ export function OutlinePanel() {
             >
               Import text
             </button>
-            <button
-              className="border border-black px-2 py-1 text-xs hover:bg-black hover:text-white"
-              onClick={() => addFlowSection('Section')}
+            <select
+              className="border border-black bg-white px-1 text-xs"
+              value=""
+              onChange={(e) => e.target.value && addFlowSection(e.target.value)}
             >
-              + Section
-            </button>
+              <option value="">+ Section…</option>
+              {FLOW_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* One layout, two editions. Switching re-typesets: French runs longer
@@ -324,6 +346,38 @@ export function OutlinePanel() {
               {w}
             </p>
           ))}
+
+          {/* Orphans are surfaced, never dropped. An override whose anchor block
+              was deleted keeps existing until someone decides its fate — silent
+              loss is how a tool teaches people not to trust it. */}
+          {orphans.length > 0 && (
+            <div className="border border-black p-1 text-[11px]">
+              <div className="font-bold">
+                {orphans.length} pinned item{orphans.length === 1 ? '' : 's'} lost
+                {orphans.length === 1 ? ' its' : ' their'} anchor
+              </div>
+              {orphans.map((o) => (
+                <div key={o.id} className="mt-1 flex items-center gap-1">
+                  <span className="flex-1 truncate opacity-70">
+                    {o.kind === 'pin' ? o.element.kind : 'page style'}
+                  </span>
+                  <button
+                    className="border border-black px-1 hover:bg-black hover:text-white"
+                    onClick={() => flow.blocks[0] && reanchor(o.id, flow.blocks[0].id)}
+                    disabled={!flow.blocks.length}
+                  >
+                    Re-anchor
+                  </button>
+                  <button
+                    className="border border-black px-1 hover:bg-black hover:text-white"
+                    onClick={() => removeOverride(flow.id, o.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
 
           {flow.blocks.map((b, i) => (
             <div key={b.id} className="border border-black p-1">

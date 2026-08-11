@@ -1,13 +1,18 @@
 import { getFormat, type FormatId } from '../config/formats'
 import type { PageElement } from '../doc/types'
 import { grid } from '../render/grid'
+import { A4_TEMPLATES } from './a4'
 import { REPORT_TEMPLATES } from './report'
 import { SLIDE_TEMPLATES } from './slides'
 import type { Template } from './types'
 
 export type { Template } from './types'
 
-export const ALL_TEMPLATES: Template[] = [...SLIDE_TEMPLATES, ...REPORT_TEMPLATES]
+export const ALL_TEMPLATES: Template[] = [
+  ...SLIDE_TEMPLATES,
+  ...A4_TEMPLATES,
+  ...REPORT_TEMPLATES,
+]
 
 export const templatesFor = (format: FormatId): Template[] =>
   ALL_TEMPLATES.filter((t) => t.formats.includes(format))
