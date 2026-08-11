@@ -15,5 +15,5 @@ export const templatesFor = (format: FormatId): Template[] =>
 /** Build a template's elements against a format's grid, at its base size. */
 export function buildTemplate(template: Template, format: FormatId): PageElement[] {
   const f = getFormat(format)
-  return template.build({ format: f, g: grid(f.w, f.h, f.cols, f.rows) })
+  return template.build({ format: f, g: grid(f.w, f.h, f.cols, f.rows, f.margin * f.w) })
 }

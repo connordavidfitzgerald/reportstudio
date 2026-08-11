@@ -244,7 +244,7 @@ export const useDeck = create<DeckStore>((set, get) => ({
         const page = s.deck.pages.find((p) => p.id === pgId)
         if (!page) return {}
         const f = getFormat(s.deck.format)
-        const g = grid(f.w, f.h, f.cols, f.rows)
+        const g = grid(f.w, f.h, f.cols, f.rows, f.margin * f.w)
         const pick = new Set(ids)
         const copies = page.elements
           .filter((el) => pick.has(el.id))
@@ -371,7 +371,7 @@ export const useDeck = create<DeckStore>((set, get) => ({
         const to = getFormat(format)
         const sx = to.cols / from.cols
         const sy = to.rows / from.rows
-        const g = grid(to.w, to.h, to.cols, to.rows)
+        const g = grid(to.w, to.h, to.cols, to.rows, to.margin * to.w)
         // Proportional remap. Lossy for tight compositions — the UI gates this
         // behind a confirmation.
         const pages = s.deck.pages.map((p) => ({

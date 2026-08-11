@@ -20,6 +20,35 @@ the type scale, palettes and the shared control-panel components.
 
 These are the only intentional differences; keep the list current.
 
+### Brand corrections from the *Tools for Change* redesign
+
+The poster app predates the report redesign, so on these four points **this copy is
+right and the poster is wrong**. Rule 1 is inverted here: these should be
+back-ported *to* the poster, not overwritten by it. Measurements and their Figma
+sources are documented in `src/config/brand.ts`.
+
+- `config/palettes.ts` — replaced the four Instagram *category* palettes (Event /
+  Information / Resources / About, carrying a `// EDIT THESE with the real brand
+  values` note) with the four real page **surfaces**: paper `#FFF8EC`, lime
+  `#99CC00`, ochre `#CC9900`, pink `#FF669E`. `highlight` is now the swash colour
+  — pink on every surface except pink, which falls back to paper.
+- `config/constants.ts` — `TEXT_COLOR` is black at **0.7**, not 0.55. Every text
+  fill and every rule in the source file uses that alpha. It must stay an alpha:
+  the same ink sits on four different surfaces, so a pre-blended hex is wrong on
+  at least three of them.
+- `config/constants.ts` — `TYPE_RATIO` (1.25) is now only a default for the
+  primitives in this folder. The ladder is per-format on `PageFormat.typeRatio`,
+  because the report measured at **1.2** — exactly: 12.5 × 1.2⁸ = 53.75, the
+  chapter-title size in the file.
+- `config/fonts.ts` — the two voices are named `DISPLAY_FONT` (Review Condensed
+  Heavy, 800) and `TEXT_FONT` (Neue Haas Grotesk Display Pro 65 Medium, 500),
+  with `HEADER_FONT` / `SECONDARY_FONT` kept as aliases. The text voice is **not**
+  Helvetica Neue Bold, which is what both apps shipped before the redesign was
+  measured. Both real font files are still outstanding — see the stand-ins noted
+  in `src/index.css`.
+
+### Structural
+
 - `types.ts` — new. Holds the visual types the poster kept in its app-level
   `src/types.ts` (`Palette`, `PaperPreset`, `HalftoneParams`, `Rect`,
   `TextAlign`, `SecondaryPos`), plus `TextBlockLike`.

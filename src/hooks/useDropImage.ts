@@ -61,7 +61,7 @@ export function useDropImage(
       const r = canvas.getBoundingClientRect()
       const x = ((e.clientX - r.left) / r.width) * format.w
       const y = ((e.clientY - r.top) / r.height) * format.h
-      const g = grid(format.w, format.h, format.cols, format.rows)
+      const g = grid(format.w, format.h, format.cols, format.rows, format.margin * format.w)
       const cell = g.cellAt(x, y)
 
       const target = hitTest(placed, x, y)

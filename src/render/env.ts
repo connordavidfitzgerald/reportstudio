@@ -67,7 +67,7 @@ export function buildPageEnv(
     deck,
     format,
     palette: getPalette(page.paletteId ?? deck.paletteId),
-    g: grid(w, h, format.cols, format.rows),
+    g: grid(w, h, format.cols, format.rows, format.margin * w),
     w,
     h,
     shortEdge: Math.min(w, h),

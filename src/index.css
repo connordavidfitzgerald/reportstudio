@@ -8,10 +8,32 @@
     font-display: swap;
 }
 
+/*
+ * The two brand voices. See src/core/config/fonts.ts.
+ *
+ * STAND-INS IN PLACE — both real files are still outstanding:
+ *
+ *  1. "Review Condensed" should be ReviewCondensed-Heavy (800). We ship
+ *     ReviewCondensed-Black (900), which is a touch heavier.
+ *  2. "Neue Haas Grotesk" should be NeueHaasGroteskDisplayPro-65Medium (500).
+ *     We ship HelveticaNeue-Bold, a cousin at the wrong weight — noticeably
+ *     different at chapter-title size.
+ *
+ * Dropping the real .otf files in src/fonts/ and swapping the two urls below is
+ * the whole change; nothing else references the filenames.
+ */
 @font-face {
-    font-family: "Review";
+    font-family: "Review Condensed";
     src: url("./fonts/ReviewCondensed-Black.otf") format("opentype");
-    font-weight: 700;
+    font-weight: 800;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Neue Haas Grotesk";
+    src: url("./fonts/HelveticaNeue-Bold.otf") format("opentype");
+    font-weight: 500;
     font-style: normal;
     font-display: swap;
 }

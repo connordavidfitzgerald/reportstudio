@@ -1,11 +1,19 @@
 import type { HalftoneParams } from "../types";
 import logo from "../../assets/logo.webp";
 
-/** The fixed brand pink — used ONLY for the notched header outline stroke. */
+/** The fixed brand pink — the notched outline / swash fill. */
 export const OUTLINE_COLOR = "#FF669E";
 
-/** All glyph fills (header, secondary, category) are black at 60% opacity. */
-export const TEXT_COLOR = "rgba(0, 0, 0, 0.55)";
+/**
+ * Every glyph fill and every rule is black at 70% over the page surface.
+ *
+ * Measured from the *Tools for Change* redesign, where all four surfaces rely on
+ * this one alpha. It must stay an alpha rather than a blended hex — pre-blending
+ * would be wrong on each of the four backgrounds.
+ *
+ * Delta from the poster app, which uses 0.55.
+ */
+export const TEXT_COLOR = "rgba(0, 0, 0, 0.7)";
 
 /**
  * Padding around every fitted text background (header + secondary + category),
@@ -33,6 +41,11 @@ export const PARAGRAPH_LINE_HEIGHT = 1;
  *   step 2 → small subhead · step 4 → medium subhead
  */
 export const TYPE_BASE = 0.035;
+/**
+ * Default ladder ratio, used by the poster-derived primitives in this folder.
+ * Formats now carry their own — the report is 1.2, not 1.25 — so prefer
+ * `PageFormat.typeRatio` via `typeStepFor()` anywhere a format is in hand.
+ */
 export const TYPE_RATIO = 1.25;
 export const typeStep = (n: number): number => TYPE_BASE * TYPE_RATIO ** n;
 

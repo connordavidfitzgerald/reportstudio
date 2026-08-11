@@ -62,7 +62,7 @@ export function useCanvasEditor(
   const gestureRef = useRef<Gesture>({ kind: 'none' })
 
   const format = getFormat(deck.format)
-  const g = grid(format.w, format.h, format.cols, format.rows)
+  const g = grid(format.w, format.h, format.cols, format.rows, format.margin * format.w)
   const grab = format.w * HANDLE_GRAB_RATIO
 
   /** Client coordinates → page pixels. Handles the canvas' CSS downscale. */
