@@ -50,6 +50,14 @@ export interface TextStyle extends FillStyle {
   font: string
   align: CanvasTextAlign
   baseline: CanvasTextBaseline
+  /**
+   * Canvas `letterSpacing`, verbatim (e.g. `'-0.38px'`).
+   *
+   * `core/elements.ts` sets this through a cast, which is easy to miss and
+   * expensive to get wrong: body copy carries -3% tracking, so dropping it makes
+   * every measured width disagree with what was drawn.
+   */
+  letterSpacing: string
 }
 
 export type Point = { x: number; y: number }
@@ -65,6 +73,7 @@ export type DrawOp =
 interface State {
   fillStyle: string
   font: string
+  letterSpacing: string
   textAlign: CanvasTextAlign
   textBaseline: CanvasTextBaseline
   globalAlpha: number
@@ -75,6 +84,7 @@ interface State {
 const initialState = (): State => ({
   fillStyle: '#000',
   font: '10px sans-serif',
+  letterSpacing: '0px',
   textAlign: 'start',
   textBaseline: 'alphabetic',
   globalAlpha: 1,
@@ -101,6 +111,12 @@ class Recorder {
   set fillStyle(v: string) { this.s.fillStyle = v }
   get font(): string { return this.s.font }
   set font(v: string) { this.s.font = v; this.metrics.font = v }
+  get letterSpacing(): string { return this.s.letterSpacing }
+  set letterSpacing(v: string) {
+    this.s.letterSpacing = v
+    // Forward it, or `measureText` here would disagree with the real canvas.
+    ;(this.metrics as unknown as { letterSpacing: string }).letterSpacing = v
+  }
   get textAlign(): CanvasTextAlign { return this.s.textAlign }
   set textAlign(v: CanvasTextAlign) { this.s.textAlign = v }
   get textBaseline(): CanvasTextBaseline { return this.s.textBaseline }
@@ -165,7 +181,13 @@ class Recorder {
       text,
       x,
       y,
-      style: { ...this.fillStyleOf(), font: this.s.font, align: this.s.textAlign, baseline: this.s.textBaseline },
+      style: {
+        ...this.fillStyleOf(),
+        font: this.s.font,
+        align: this.s.textAlign,
+        baseline: this.s.textBaseline,
+        letterSpacing: this.s.letterSpacing,
+      },
     })
   }
 
@@ -193,13 +215,23 @@ export function createRecorder(metrics: CanvasRenderingContext2D): {
   ops: DrawOp[]
 } {
   const rec = new Recorder(metrics)
+  const unknown = (prop: string | symbol, verb: string): never => {
+    throw new Error(
+      `[record] canvas member "${String(prop)}" is not implemented (${verb}). Add it to ` +
+        `render/record.ts — otherwise it would take effect on screen and vanish from the PDF.`,
+    )
+  }
   const guarded = new Proxy(rec, {
     get(target, prop, receiver) {
       if (prop in target || typeof prop === 'symbol') return Reflect.get(target, prop, receiver)
-      throw new Error(
-        `[record] canvas member "${String(prop)}" is not implemented. Add it to ` +
-          `render/record.ts — otherwise it would draw on screen and vanish from the PDF.`,
-      )
+      return unknown(prop, 'read')
+    },
+    // Writes need guarding too, and are the easier trap to fall into: without
+    // this, `ctx.letterSpacing = '-0.38px'` would quietly land on the recorder
+    // as a stray own-property and be dropped from every export.
+    set(target, prop, value, receiver) {
+      if (!(prop in target) && typeof prop !== 'symbol') unknown(prop, 'write')
+      return Reflect.set(target, prop, value, receiver)
     },
   })
   return { ctx: guarded as unknown as CanvasRenderingContext2D, ops: rec.ops }
@@ -241,6 +273,7 @@ export function replayOps(ctx: CanvasRenderingContext2D, ops: DrawOp[]): void {
         ctx.font = item.style.font
         ctx.textAlign = item.style.align
         ctx.textBaseline = item.style.baseline
+        ;(ctx as unknown as { letterSpacing: string }).letterSpacing = item.style.letterSpacing
         ctx.fillText(item.text, item.x, item.y)
         break
       case 'image':

@@ -18,6 +18,7 @@ import { createRecorder, replayOps } from '../src/render/record.ts'
 const metricsStub = () => ({
   font: '',
   textBaseline: 'alphabetic',
+  letterSpacing: '0px',
   measureText: (t) => ({ width: t.length * 10, actualBoundingBoxAscent: 8 }),
 })
 
@@ -115,6 +116,33 @@ const rec = () => createRecorder(metricsStub())
   assert.equal(ops[1].style.baseline, 'alphabetic')
 }
 
+// -- letterSpacing is captured, and forwarded to the metrics context ---------
+// core/elements.ts sets this through a cast. Body copy carries -3% tracking, so
+// losing it makes every measured width disagree with what was drawn.
+{
+  const metrics = metricsStub()
+  const { ctx, ops } = createRecorder(metrics)
+  ctx.letterSpacing = '-0.38px'
+  ctx.fillText('body copy', 40, 100)
+  assert.equal(ops[0].style.letterSpacing, '-0.38px', 'tracking is recorded')
+  assert.equal(metrics.letterSpacing, '-0.38px', 'tracking reaches the measuring context')
+
+  ctx.save()
+  ctx.letterSpacing = '0px'
+  ctx.fillText('header', 40, 200)
+  ctx.restore()
+  ctx.fillText('body again', 40, 300)
+  assert.equal(ops[1].style.letterSpacing, '0px')
+  assert.equal(ops[2].style.letterSpacing, '-0.38px', 'tracking is restorable state')
+}
+
+// Writing an unknown member must throw too. This is the easier trap: a silent
+// stray own-property would take effect on screen and vanish from the PDF.
+{
+  const { ctx } = rec()
+  assert.throws(() => { ctx.shadowBlur = 4 }, /not implemented \(write\)/, 'unknown writes throw')
+}
+
 // -- unimplemented members fail loudly --------------------------------------
 {
   const { ctx } = rec()
@@ -145,8 +173,10 @@ const rec = () => createRecorder(metricsStub())
   ctx.font = '500 12.64px "Neue Haas Grotesk"'
   ctx.textAlign = 'left'
   ctx.textBaseline = 'alphabetic'
+  ctx.letterSpacing = '-0.38px'
   ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'
   ctx.fillText('Tools for Change', 40, 220)
+  ctx.letterSpacing = '0px'
   ctx.globalAlpha = 0.4
   ctx.globalCompositeOperation = 'soft-light'
   ctx.drawImage(img, 0, 0, 1240, 1754)

@@ -1,6 +1,7 @@
 import type { PDFDocument, PDFImage, PDFPage } from 'pdf-lib'
 import type { Rect } from '../core/types'
 import type { DrawOp } from '../render/record'
+import { setCharacterSpacing } from 'pdf-lib'
 import { parseFont, type FontBook } from './pdfFonts'
 import { blendOf, parseColor, PdfSpace, ringsToPath } from './pdfGfx'
 
@@ -171,28 +172,39 @@ function drawTextOp(cx: PaintContext, op: Extract<DrawOp, { op: 'text' }>): void
   const { color, opacity } = parseColor(op.style.fill, op.style.alpha)
   if (opacity <= 0) return
 
+  // Body copy carries negative tracking. PDF's Tc has the same meaning as canvas
+  // `letterSpacing` — extra advance after each glyph — so setting it makes the
+  // two engines agree by construction rather than by luck. Tc is text state, so
+  // it is set outside the run and cleared afterwards.
+  const trackingPx = parseFloat(op.style.letterSpacing) || 0
+  const tc = cx.space.len(trackingPx)
+  if (tc) cx.page.pushOperators(setCharacterSpacing(tc))
+
   cx.metrics.font = op.style.font
+  ;(cx.metrics as unknown as { letterSpacing: string }).letterSpacing = op.style.letterSpacing
   const canvasW = cx.metrics.measureText(op.text).width
   const originPx = op.x + alignShift(op.style.align, canvasW)
   const common = { size: sizePt, font, color, opacity, blendMode: blendOf(op.style.composite) }
 
-  const pdfW = font.widthOfTextAtSize(op.text, sizePt) / cx.space.scale
+  // Tc applies to every glyph including the last, which canvas does too.
+  const pdfW = (font.widthOfTextAtSize(op.text, sizePt) + tc * op.text.length) / cx.space.scale
   const agrees = canvasW === 0 || Math.abs(pdfW - canvasW) / canvasW <= WIDTH_TOLERANCE
 
   if (agrees || !op.text.includes(' ')) {
     cx.page.drawText(op.text, { x: cx.space.x(originPx), y: cx.space.y(op.y), ...common })
-    return
+  } else {
+    // Word-by-word, each anchored where canvas put it.
+    let cursor = 0
+    for (const word of op.text.split(/(\s+)/)) {
+      if (word.trim()) {
+        const at = originPx + cx.metrics.measureText(op.text.slice(0, cursor)).width
+        cx.page.drawText(word, { x: cx.space.x(at), y: cx.space.y(op.y), ...common })
+      }
+      cursor += word.length
+    }
   }
 
-  // Word-by-word, each anchored where canvas put it.
-  let cursor = 0
-  for (const word of op.text.split(/(\s+)/)) {
-    if (word.trim()) {
-      const at = originPx + cx.metrics.measureText(op.text.slice(0, cursor)).width
-      cx.page.drawText(word, { x: cx.space.x(at), y: cx.space.y(op.y), ...common })
-    }
-    cursor += word.length
-  }
+  if (tc) cx.page.pushOperators(setCharacterSpacing(0))
 }
 
 // ---------------------------------------------------------------------------
