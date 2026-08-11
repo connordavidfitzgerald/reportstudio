@@ -53,7 +53,19 @@ export const frameRect = (g: Grid, f: Frame, h: number): Rect => ({
  */
 export type RenderItem =
   | { kind: 'boxed'; el: PageElement; source: 'free' | 'pinned' | 'furniture' }
-  | { kind: 'framed'; el: PageElement; frame: Frame; source: 'flow'; blockId: string }
+  | {
+      kind: 'framed'
+      el: PageElement
+      frame: Frame
+      /**
+       * Furniture is framed rather than boxed because a 1pt rule is thinner than
+       * any grid row — page chrome needs the same continuous vertical axis that
+       * flowed content does.
+       */
+      source: 'flow' | 'furniture'
+      /** Flowed items only; furniture belongs to no block. */
+      blockId?: string
+    }
 
 export interface RenderPage {
   id: string

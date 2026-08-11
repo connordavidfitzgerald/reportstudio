@@ -1,7 +1,8 @@
 import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { getFormat } from '../config/formats'
 import { createElement, defaultBox } from '../doc/defaults'
-import type { Box, Deck, Page } from '../doc/types'
+import type { Box, Deck } from '../doc/types'
+import type { RenderPage } from '../render/page'
 import type { Rect } from '../core/types'
 import { grid } from '../render/grid'
 import {
@@ -40,7 +41,7 @@ type Gesture =
 
 export function useCanvasEditor(
   canvasRef: React.RefObject<HTMLCanvasElement | null>,
-  page: Page,
+  page: RenderPage,
   deck: Deck,
   placed: Placed[],
 ) {

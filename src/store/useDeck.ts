@@ -2,8 +2,9 @@ import { create } from 'zustand'
 import { pruneImageBlobs } from '../core/imageStore'
 import { collectBlobIds } from '../doc/imageCache'
 import { createDeck, createSection, pageId } from '../doc/defaults'
-import type { Box, Deck, Page, PageElement } from '../doc/types'
-import { deckPages, type Section, type StaticSection } from '../doc/sections'
+import type { Box, Deck, PageElement } from '../doc/types'
+import type { RenderPage } from '../render/page'
+import { deckPages, isStatic, type Section, type StaticSection } from '../doc/sections'
 import type { FormatId } from '../config/formats'
 import { getFormat } from '../config/formats'
 import { grid } from '../render/grid'
@@ -129,7 +130,13 @@ function mapSection(
   id: string,
   fn: (s: StaticSection) => StaticSection,
 ): Deck {
-  return { ...deck, sections: deck.sections.map((s) => (s.id === id ? fn(s) : s)) }
+  return {
+    ...deck,
+    // Element mutators reach hand-composed sections only. A flowed element has
+    // no `Box` to change — editing one means editing its block — so a stray call
+    // is a no-op rather than a corrupt document.
+    sections: deck.sections.map((s) => (s.id === id && isStatic(s) ? fn(s) : s)),
+  }
 }
 
 function mapElements(
@@ -247,7 +254,7 @@ export const useDeck = create<DeckStore>((set, get) => ({
     tagged('element:duplicate', () =>
       set((s) => {
         const page = s.deck.sections.find((p) => p.id === pgId)
-        if (!page) return {}
+        if (!page || !isStatic(page)) return {}
         const f = getFormat(s.deck.format)
         const g = grid(f.w, f.h, f.cols, f.rows, f.margin * f.w)
         const pick = new Set(ids)
@@ -318,13 +325,14 @@ export const useDeck = create<DeckStore>((set, get) => ({
     tagged('page:duplicate', () =>
       set((s) => {
         const index = s.deck.sections.findIndex((p) => p.id === id)
-        if (index < 0) return {}
+        const source = s.deck.sections[index]
+        if (index < 0 || !isStatic(source)) return {}
         // Elements are copied with fresh ids; image *references* are shared, so
         // the duplicate reuses the same decode rather than loading it again.
         const copy: StaticSection = {
-          ...s.deck.sections[index],
+          ...source,
           id: pageId(),
-          elements: s.deck.sections[index].elements.map((el) => ({
+          elements: source.elements.map((el) => ({
             ...el,
             id: `${el.id}_c${Math.random().toString(36).slice(2, 7)}`,
           })),
@@ -377,20 +385,26 @@ export const useDeck = create<DeckStore>((set, get) => ({
         const sx = to.cols / from.cols
         const sy = to.rows / from.rows
         const g = grid(to.w, to.h, to.cols, to.rows, to.margin * to.w)
-        // Proportional remap. Lossy for tight compositions — the UI gates this
-        // behind a confirmation.
-        const sections = s.deck.sections.map((p) => ({
-          ...p,
-          elements: p.elements.map((el) => ({
-            ...el,
-            box: g.clampBox({
-              col: Math.round(el.box.col * sx),
-              row: Math.round(el.box.row * sy),
-              colSpan: Math.max(1, Math.round(el.box.colSpan * sx)),
-              rowSpan: Math.max(1, Math.round(el.box.rowSpan * sy)),
-            }),
-          })),
-        }))
+        // Proportional remap of hand-placed boxes. Lossy for tight
+        // compositions — the UI gates this behind a confirmation. Flow sections
+        // need nothing: their geometry is derived, so they simply re-typeset
+        // into the new format.
+        const sections = s.deck.sections.map((p) =>
+          !isStatic(p)
+            ? p
+            : {
+                ...p,
+                elements: p.elements.map((el) => ({
+                  ...el,
+                  box: g.clampBox({
+                    col: Math.round(el.box.col * sx),
+                    row: Math.round(el.box.row * sy),
+                    colSpan: Math.max(1, Math.round(el.box.colSpan * sx)),
+                    rowSpan: Math.max(1, Math.round(el.box.rowSpan * sy)),
+                  }),
+                })),
+              },
+        )
         return { deck: deepFreeze({ ...s.deck, format, sections }) }
       }),
     ),
@@ -410,10 +424,11 @@ export const useDeck = create<DeckStore>((set, get) => ({
       // A text element left empty is litter from a stray click — drop it.
       const s = get()
       const page = s.deck.sections.find((p) => p.id === s.currentPageId)
-      const empty = page?.elements.find(
+      if (!page || !isStatic(page)) return
+      const empty = page.elements.find(
         (el) => el.id === editedId && el.kind === 'text' && !el.text.trim(),
       )
-      if (page && empty) s.removeElements(page.id, [empty.id])
+      if (empty) s.removeElements(page.id, [empty.id])
     }),
 }))
 
@@ -464,7 +479,7 @@ export function pruneImages(): Promise<void> {
 }
 
 /** The page currently open in the editor. */
-export function useCurrentPage(): Page {
+export function useCurrentPage(): RenderPage {
   return useDeck(
     (s) => deckPages(s.deck).find((p) => p.id === s.currentPageId) ?? deckPages(s.deck)[0],
   )

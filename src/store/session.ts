@@ -51,11 +51,15 @@ function reviveElement(raw: PageElement): PageElement | null {
 
 function reviveSection(raw: Section): Section | null {
   if (!raw?.id) return null
+  if (raw.kind === 'flow') {
+    // Blocks are plain data with no per-kind defaults to spread, so a flow
+    // section only needs its stream to survive.
+    return { ...raw, blocks: raw.blocks ?? [] }
+  }
   const elements = (raw.elements ?? []).map(reviveElement).filter((e): e is PageElement => !!e)
-  // `kind` is asserted rather than trusted: anything reaching here has been
-  // through the migration above, and a hand-edited or truncated entry missing
-  // the field still loads. Once flow sections exist this becomes a branch, and
-  // the type checker will say so.
+  // `kind` is asserted rather than trusted for static sections: anything
+  // reaching here has been through the migration above, and a hand-edited or
+  // truncated entry missing the field still loads as one.
   return { ...raw, kind: 'static', elements }
 }
 

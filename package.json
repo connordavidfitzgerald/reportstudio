@@ -12,9 +12,10 @@
     "spike:pdf": "node scripts/spike-pdf.mjs",
     "check:migrations": "node --import ./scripts/register-ts.mjs scripts/check-migrations.mjs",
     "check:geometry": "node --import ./scripts/register-ts.mjs scripts/check-geometry.mjs",
-    "check": "npm run check:migrations && npm run check:geometry && npm run check:record && npm run check:pdfgfx",
+    "check": "npm run check:migrations && npm run check:geometry && npm run check:record && npm run check:pdfgfx && npm run check:flow",
     "check:record": "node --import ./scripts/register-ts.mjs scripts/check-record.mjs",
-    "check:pdfgfx": "node --import ./scripts/register-ts.mjs scripts/check-pdfgfx.mjs"
+    "check:pdfgfx": "node --import ./scripts/register-ts.mjs scripts/check-pdfgfx.mjs",
+    "check:flow": "node --import ./scripts/register-ts.mjs scripts/check-flow.mjs"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",

@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useFontsReady } from '../core/hooks/useFontsReady'
 import { getFormat } from '../config/formats'
 import { useImageCache } from '../doc/imageCache'
-import type { Deck, Page } from '../doc/types'
+import type { Deck } from '../doc/types'
 import { deckPages } from '../doc/sections'
+import type { RenderPage } from '../render/page'
 import { renderPage } from '../render/renderPage'
 import { useDeck } from '../store/useDeck'
 import { useRenderAssets } from '../hooks/useRenderAssets'
@@ -31,7 +32,7 @@ function Thumb({
   onDragStart,
   onDrop,
 }: {
-  page: Page
+  page: RenderPage
   deck: Deck
   index: number
   active: boolean
@@ -43,7 +44,7 @@ function Thumb({
 }) {
   const ref = useRef<HTMLCanvasElement>(null)
   /** Identity of the last thing painted, so an unrelated edit is a no-op. */
-  const painted = useRef<{ page: Page; look: string } | null>(null)
+  const painted = useRef<{ page: RenderPage; look: string } | null>(null)
   const imageVersion = useImageCache()
 
   const format = getFormat(deck.format)

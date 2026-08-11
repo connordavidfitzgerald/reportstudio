@@ -3,7 +3,8 @@ import { putImageBlob } from '../core/imageStore'
 import { getFormat } from '../config/formats'
 import { createElement, defaultBox } from '../doc/defaults'
 import { preload } from '../doc/imageCache'
-import type { Deck, Page } from '../doc/types'
+import type { Deck } from '../doc/types'
+import type { RenderPage } from '../render/page'
 import { grid } from '../render/grid'
 import { hitTest } from '../render/hitTest'
 import type { Placed } from '../render/layoutPage'
@@ -19,7 +20,7 @@ import { useDeck } from '../store/useDeck'
  */
 export function useDropImage(
   canvasRef: React.RefObject<HTMLCanvasElement | null>,
-  page: Page,
+  page: RenderPage,
   deck: Deck,
   placed: Placed[],
 ) {

@@ -1,25 +1,10 @@
 import { useMemo } from 'react'
 import { getFormat } from '../config/formats'
-import type { Deck, Page } from '../doc/types'
+import type { Deck } from '../doc/types'
+import type { RenderPage } from '../render/page'
 import { buildPageEnv, type RenderAssets } from '../render/env'
-import { toRenderPage } from '../render/page'
+import { measureCtx } from '../render/measureCtx'
 import { layoutPage, type Placed } from '../render/layoutPage'
-
-/**
- * A scratch context used only for text measurement. `measureText` needs a
- * context, not pixels, so this stays 1×1 forever — the layout math is driven by
- * the width/height arguments passed to `buildPageEnv`, never by the canvas size.
- */
-let scratch: CanvasRenderingContext2D | null = null
-function scratchCtx(): CanvasRenderingContext2D {
-  if (!scratch) {
-    const c = document.createElement('canvas')
-    c.width = 1
-    c.height = 1
-    scratch = c.getContext('2d')!
-  }
-  return scratch
-}
 
 /**
  * Every element on a page resolved to pixels, at the format's *base* size.
@@ -29,7 +14,7 @@ function scratchCtx(): CanvasRenderingContext2D {
  * coordinate space, so none of them can drift from each other or from the paint.
  */
 export function usePlacedElements(
-  page: Page,
+  page: RenderPage,
   deck: Deck,
   assets: RenderAssets,
   fontsReady: boolean,
@@ -37,7 +22,7 @@ export function usePlacedElements(
   return useMemo(() => {
     if (!fontsReady) return []
     const f = getFormat(deck.format)
-    const env = buildPageEnv(scratchCtx(), toRenderPage(page), deck, f.w, f.h, assets)
+    const env = buildPageEnv(measureCtx(), page, deck, f.w, f.h, assets)
     return layoutPage(env)
   }, [page, deck, assets, fontsReady])
 }

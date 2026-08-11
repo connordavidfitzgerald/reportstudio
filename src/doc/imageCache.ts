@@ -75,7 +75,7 @@ export function getImage(ref: ImageRef | null): HTMLImageElement | null {
 export function collectImageRefs(deck: Deck): ImageRef[] {
   const seen = new Map<string, ImageRef>()
   for (const page of deckPages(deck)) {
-    for (const el of page.elements) {
+    for (const { el } of page.items) {
       if (el.kind === 'image' && el.imageRef) seen.set(refKey(el.imageRef), el.imageRef)
     }
   }

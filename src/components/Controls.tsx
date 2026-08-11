@@ -31,7 +31,7 @@ export function Controls() {
 
   const [busy, setBusy] = useState<string | null>(null)
 
-  const selected = page.elements.filter((e) => selectedIds.includes(e.id))
+  const selected = page.items.map((i) => i.el).filter((e) => selectedIds.includes(e.id))
   const one = selected.length === 1 ? selected[0] : null
 
   const changeFormat = (f: FormatId) => {

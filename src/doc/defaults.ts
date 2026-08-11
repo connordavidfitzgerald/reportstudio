@@ -11,7 +11,8 @@ import type {
   PageElement,
   TextElement,
 } from './types'
-import type { StaticSection } from './sections'
+import type { FlowSection, StaticSection } from './sections'
+import { blockId } from './blocks'
 
 let seq = 0
 const uid = (prefix: string) => `${prefix}_${Date.now().toString(36)}_${(seq++).toString(36)}`
@@ -103,6 +104,25 @@ function createStarterPage(format: FormatId): StaticSection {
       bg: 'highlight',
     }),
   ])
+}
+
+/**
+ * A flow section seeded with the shape a report section actually takes, so a new
+ * one opens on something typeset rather than an empty region.
+ */
+export function createFlowSection(title = 'Section'): FlowSection {
+  return {
+    kind: 'flow',
+    id: pageId(),
+    title,
+    blocks: [
+      { id: blockId(), kind: 'heading', text: 'Chapter title' },
+      { id: blockId(), kind: 'lede', text: 'The opening paragraph, set larger and flush left.' },
+      { id: blockId(), kind: 'subhead', text: 'Subsection' },
+      { id: blockId(), kind: 'para', text: 'Running text, set with a first-line indent and no space between paragraphs.', indent: false },
+      { id: blockId(), kind: 'para', text: 'The second paragraph onward carries the indent, which is what makes the setting read as a book rather than a web page.' },
+    ],
+  }
 }
 
 export function createDeck(format: FormatId = 'slide'): Deck {

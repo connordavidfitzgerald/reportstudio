@@ -1,4 +1,4 @@
-import { OUTLINE_COLOR } from '../core/config/constants'
+import { OUTLINE_COLOR, TEXT_COLOR } from '../core/config/constants'
 import { getPalette } from '../core/config/palettes'
 import type { Palette } from '../core/types'
 import type { BgRole, Deck } from '../doc/types'
@@ -94,6 +94,9 @@ export function colorOf(env: PageEnv, role: BgRole): string | null {
       return env.palette.highlight
     case 'background':
       return env.palette.background
+    case 'ink':
+      // Black at 70% over whichever surface the page is — rules and folios.
+      return TEXT_COLOR
     case 'none':
       return null
   }

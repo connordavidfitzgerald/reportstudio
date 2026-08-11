@@ -36,7 +36,7 @@ export type TextVariant = 'header' | 'badge' | 'paragraph' | 'plain'
  * A background colour named by its *role* in the palette rather than by hex, so
  * changing the deck's palette restyles every page at once.
  */
-export type BgRole = 'outline' | 'secondary' | 'highlight' | 'background' | 'none'
+export type BgRole = 'outline' | 'secondary' | 'highlight' | 'background' | 'ink' | 'none'
 
 export interface TextElement extends ElementBase {
   kind: 'text'
