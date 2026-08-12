@@ -95,6 +95,8 @@ export function createBlock(kind: BlockKind): Block {
       }
     case 'figure':
       return { id, kind, imageRef: null, col: 1, span: 7, aspect: 1.35 }
+    case 'band':
+      return { id, kind, text: 'Photo courtesy of —', surface: 'pink', bleed: 'right', size: 'm' }
     case 'chart':
       return {
         id,
@@ -168,6 +170,7 @@ export const BLOCK_LABELS: Record<BlockKind, string> = {
   subhead: 'Ruled sub-head',
   defList: 'Definition list',
   figure: 'Image',
+  band: 'Colour band',
   chart: 'Bar chart',
   statement: 'Statement',
   quote: 'Pull quote',

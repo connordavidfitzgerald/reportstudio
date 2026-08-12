@@ -44,6 +44,8 @@ function summarise(block: Block, lang: 'en' | 'fr'): string {
       return `${t(block.label, lang)} · ${block.folio}`
     case 'cover':
       return t(block.title, lang).replace(/\n/g, ' ')
+    case 'band':
+      return `${block.surface} · ${t(block.text, lang)}`
     default:
       return t(block.text, lang)
   }

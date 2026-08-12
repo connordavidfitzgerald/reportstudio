@@ -71,17 +71,18 @@ function paintOverlays(env: LeafEnv): void {
   for (const overlay of OVERLAYS) {
     const img = assets.overlays[overlay.id]
     const opacity = deck.overlayOpacity[overlay.id] ?? overlay.opacity
-    if (!img || opacity <= 0) continue
+    if (!img || opacity <= 0 || !img.width) continue
     ctx.save()
     ctx.globalAlpha = opacity
     ctx.globalCompositeOperation = overlay.blend as GlobalCompositeOperation
-    // The grain is placed rotated in the file — 892 × 595 on a 595 × 842 page —
-    // so it is drawn landscape and cover-fitted rather than stretched upright.
-    const scale = overlay.rotated
-      ? Math.max(w / (h * (892.4 / 595)), h / (w * (595 / 892.4)))
-      : 1
-    const dw = overlay.rotated ? h * (892.4 / 595) * scale : w
-    const dh = overlay.rotated ? w * (595 / 892.4) * scale : h
+    // Cover-fit, centred. An earlier version tried to reproduce the file's
+    // rotated placement with a scale expression and got it badly wrong — it
+    // drew the grain about four and a half times too wide, so all you ever saw
+    // was a magnified sliver. Orientation is meaningless for a grain wash
+    // anyway; what matters is that it covers without distorting.
+    const scale = Math.max(w / img.width, h / img.height)
+    const dw = img.width * scale
+    const dh = img.height * scale
     ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh)
     ctx.restore()
   }

@@ -1,6 +1,6 @@
 import type { Rect, TextAlign } from './types'
 import { fontFor, fontString } from '../config/fonts'
-import { ink, SWASH_HEIGHT, SWASH_PAD_X, type InkAlphaId, type TypeRole } from '../config/brand'
+import { ink, SWASH_PAD_X, SWASH_PAD_Y, type InkAlphaId, type TypeRole } from '../config/brand'
 import type { Sheet } from './sheet'
 
 /**
@@ -209,12 +209,38 @@ export function drawLines(
 }
 
 /**
+ * How tall a swash is and where it sits, relative to the baseline.
+ *
+ * Taken from the font's own ink extents rather than a fraction of the em, so
+ * the bar actually hugs the letterforms:
+ *
+ *   display  cap height of "H" — the face is always set in caps, so there is
+ *            nothing below the baseline to cover
+ *   text     ascender to descender of "Hxp", since mixed-case runs have both
+ *
+ * Measuring a fixed reference string rather than the line itself is deliberate:
+ * per-line metrics would make the bars in one paragraph different heights
+ * depending on whether that line happened to contain a descender.
+ *
+ * Assumes `applyFont` has already run for this style.
+ */
+export function swashMetrics(
+  ctx: CanvasRenderingContext2D,
+  sheet: Sheet,
+  style: TextStyle,
+): { rise: number; height: number } {
+  const m = ctx.measureText(style.voice === 'display' ? 'H' : 'Hxp')
+  const pad = sheet.pt(style.size) * SWASH_PAD_Y
+  const rise = m.actualBoundingBoxAscent + pad
+  const drop = (style.voice === 'display' ? 0 : m.actualBoundingBoxDescent) + pad
+  return { rise, height: rise + drop }
+}
+
+/**
  * The rectangles behind a run of text on a swash.
  *
  * The swash hugs each wrapped line rather than boxing the paragraph — that is
- * what gives the statements and TOC rows their ragged right edge — and its
- * height is a fraction of the font size rather than the full line box, so
- * tightly-led display type doesn't end up with the bars touching.
+ * what gives the statements and TOC rows their ragged right edge.
  */
 export function swashRects(
   ctx: CanvasRenderingContext2D,
@@ -224,19 +250,16 @@ export function swashRects(
   box: Rect,
 ): Rect[] {
   applyFont(ctx, sheet, style)
-  const px = sheet.pt(style.size)
   const advance = lineAdvance(sheet, style)
   const base = baselineOffset(ctx, sheet, style)
-  const h = px * SWASH_HEIGHT[style.voice]
+  const { rise, height } = swashMetrics(ctx, sheet, style)
   const pad = sheet.pt(SWASH_PAD_X)
   const out: Rect[] = []
   lines.forEach((line, i) => {
     if (line.text.trim() === '') return
     const w = ctx.measureText(line.text).width
     const x = alignX(box.x, box.w, w, style.align)
-    // Sit the bar on the baseline and rise by the swash height, so it tracks
-    // the cap line rather than the line box.
-    out.push({ x: x - pad, y: box.y + i * advance + base - h, w: w + pad * 2, h })
+    out.push({ x: x - pad, y: box.y + i * advance + base - rise, w: w + pad * 2, h: height })
   })
   return out
 }

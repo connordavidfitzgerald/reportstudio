@@ -229,6 +229,35 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       return h + top
     }
 
+    case 'band': {
+      // Runs past the margin to the trim on whichever edges are set to bleed,
+      // so the field reads as part of the page rather than as a box on it.
+      const bleed = block.bleed ?? 'right'
+      const left = bleed === 'left' || bleed === 'both' ? 0 : box.x
+      const right =
+        bleed === 'right' || bleed === 'both' ? sheet.w : box.x + box.w
+      const pad = sheet.pt(block.pad ?? 10)
+      const style = bodyStyle(env, {
+        size: BODY_SIZE[block.size ?? 'm'],
+        lineHeight: SET_TEXT.lineHeight,
+        tracking: SET_TEXT.tracking,
+      })
+      applyFont(ctx, sheet, style)
+      const lines = wrapText(ctx, text(env, block.text), right - left - pad * 2, 0, style)
+      const h = lines.length * lineAdvance(sheet, style) + pad * 2
+      ctx.save()
+      ctx.fillStyle = SURFACES[block.surface]
+      ctx.fillRect(left, box.y, right - left, h)
+      ctx.restore()
+      drawLines(ctx, sheet, style, lines, {
+        x: left + pad,
+        y: box.y + pad,
+        w: right - left - pad * 2,
+        h: 0,
+      })
+      return h
+    }
+
     case 'rule':
       return rule(env, box, box.y)
 
@@ -240,8 +269,12 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       const raw = text(env, block.text)
       const segs = splitHighlights(raw, block.highlights ?? [])
       const lines = layoutInline(ctx, sheet, style, segs, box.w)
-      const base = inlineBaseline(ctx, sheet, style)
-      drawSwash(ctx, inlineSwashRects(sheet, style, lines, box, base), swashFor(env.leaf.surface))
+      const { base, metrics } = inlineBaseline(ctx, sheet, style)
+      drawSwash(
+        ctx,
+        inlineSwashRects(sheet, style, lines, box, base, metrics),
+        swashFor(env.leaf.surface),
+      )
       let h = drawInline(ctx, sheet, style, lines, box, base)
       if (block.note) {
         const note = styleFor(TYPE.statementNote)
@@ -304,14 +337,17 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
     case 'bulletList': {
       const style = bodyStyle(env, { lineHeight: SET_TEXT.lineHeight })
       const cols = block.columns ?? 1
-      const colW = cols === 2 ? (box.w - sheet.pt(GAP.block)) / 2 : box.w
+      // Columns 0–3 and 5–8, the same split the definition list uses — the file
+      // sets its second bullet column at x326 against the grid's 330.
+      const colW = cols === 2 ? sheet.colSpan(4) : box.w
+      const colStep = sheet.colX(5) - sheet.colX(0)
       const perCol = Math.ceil(block.items.length / cols)
       const indent = sheet.pt(12)
       let maxH = 0
       for (let c = 0; c < cols; c += 1) {
         let y = box.y
         for (const item of block.items.slice(c * perCol, (c + 1) * perCol)) {
-          const x = box.x + c * (colW + sheet.pt(GAP.block))
+          const x = box.x + c * colStep
           applyFont(ctx, sheet, style)
           drawLines(ctx, sheet, style, [{ text: '•', opensPara: true }], { x, y, w: indent, h: 0 })
           y += drawLines(ctx, sheet, style, wrapText(ctx, text(env, item), colW - indent, 0, style), {
@@ -333,7 +369,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
         const segs: Segment[] = [{ text: text(env, item.label), underline: true }]
         if (item.note) segs.push({ text: ` ${text(env, item.note)}` })
         const lines = layoutInline(ctx, sheet, style, segs, box.w)
-        const base = inlineBaseline(ctx, sheet, style)
+        const { base } = inlineBaseline(ctx, sheet, style)
         y += drawInline(ctx, sheet, style, lines, { ...box, y }, base)
         y += sheet.pt(GAP.tight)
       }
@@ -364,7 +400,23 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
     case 'figure': {
       const w = box.w
       const h = w * (block.aspect ?? 1.35)
-      drawImage(env, env.assets.image(block.imageRef), { x: box.x, y: box.y, w, h }, block.focus)
+      if (block.panel) {
+        // A colour field with the image inset on it — the executive-summary
+        // globe. The panel takes the block's box; the image is centred inside.
+        ctx.save()
+        ctx.fillStyle = SURFACES[block.panel]
+        ctx.fillRect(box.x, box.y, w, h)
+        ctx.restore()
+        const inset = sheet.pt(block.inset ?? 25)
+        drawImage(
+          env,
+          env.assets.image(block.imageRef),
+          { x: box.x + inset, y: box.y + inset, w: w - inset * 2, h: h - inset * 2 },
+          block.focus,
+        )
+      } else {
+        drawImage(env, env.assets.image(block.imageRef), { x: box.x, y: box.y, w, h }, block.focus)
+      }
       let used = h
       if (block.caption) {
         const style = styleFor(TYPE.caption)
@@ -443,8 +495,8 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       let y = box.y
 
       const lines = layoutInline(ctx, sheet, chapter, [{ text: text(env, block.label), swash: true }], box.w)
-      const base = inlineBaseline(ctx, sheet, chapter)
-      drawSwash(ctx, inlineSwashRects(sheet, chapter, lines, box, base), swash)
+      const { base, metrics } = inlineBaseline(ctx, sheet, chapter)
+      drawSwash(ctx, inlineSwashRects(sheet, chapter, lines, box, base, metrics), swash)
       const rowH = drawInline(ctx, sheet, chapter, lines, box, base)
       applyFont(ctx, sheet, folio)
       drawLines(ctx, sheet, folio, [{ text: String(block.folio), opensPara: true }], { ...box, y })
@@ -460,8 +512,8 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
         }
         const subBox = { x: box.x + inset, y, w: box.w - inset, h: 0 }
         const subLines = layoutInline(ctx, sheet, style, sub, subBox.w)
-        const subBase = inlineBaseline(ctx, sheet, style)
-        drawSwash(ctx, inlineSwashRects(sheet, style, subLines, subBox, subBase), swash)
+        const { base: subBase, metrics: subMetrics } = inlineBaseline(ctx, sheet, style)
+        drawSwash(ctx, inlineSwashRects(sheet, style, subLines, subBox, subBase, subMetrics), swash)
         const subH = drawInline(ctx, sheet, style, subLines, subBox, subBase)
         // The sub-row folio sits just past the swash, not out at the margin.
         const sf = styleFor(TYPE.tocSectionFolio)
@@ -608,11 +660,17 @@ function stack(env: LeafEnv, fill: number): { placed: PlacedBlock[]; end: number
   const first = env.leaf.blocks[0]
   const hangs = !env.leaf.bare && !!first && hangsFromHeadRule(first)
 
-  let y = env.leaf.bare
-    ? sheet.pt(MARGIN)
+  // Where content starts, measured off the file:
+  //   headed leaf          57  (intro, chapter, categories, exec-close, quote)
+  //   headed + def-list    43  hangs off the head rule, no rule of its own
+  //   no running head      20  no head rule to clear — colophon 23, statement 20
+  //   bare plate           20  the caption band and overlay run to the trim
+  const y0 = env.leaf.bare || !env.leaf.runningHead
+    ? RUNNING_HEAD_Y
     : hangs
-      ? sheet.pt(HEAD_RULE_Y + RULE_WEIGHT)
-      : sheet.pt(CONTENT_TOP)
+      ? HEAD_RULE_Y + RULE_WEIGHT
+      : CONTENT_TOP
+  let y = sheet.pt(y0)
 
   env.leaf.blocks.forEach((block, i) => {
     if (i > 0) y += sheet.pt(GAP.block)
@@ -640,20 +698,29 @@ function stack(env: LeafEnv, fill: number): { placed: PlacedBlock[]; end: number
  */
 export function paintBlocks(env: LeafEnv): { placed: PlacedBlock[]; overflow: boolean } {
   const { sheet } = env
+  // A bare plate has no foot rule to respect: its band and its credit run to
+  // the trim, so fills are shared out against the page edge instead.
+  const bottom = sheet.pt(env.leaf.bare ? PAGE_H - RUNNING_HEAD_Y : CONTENT_BOTTOM)
   const fills = env.leaf.blocks.filter((b) => b.kind === 'spacer' && b.height === 'fill').length
 
   let fill = 0
   if (fills > 0) {
     const probe = createRecorder(measureCtx())
     const { end } = stack({ ...env, ctx: probe.ctx }, 0)
-    fill = Math.max(0, (sheet.pt(CONTENT_BOTTOM) - end) / fills)
+    fill = Math.max(0, (bottom - end) / fills)
   }
 
   const { placed, end } = stack(env, fill)
-  return { placed, overflow: end > sheet.pt(CONTENT_BOTTOM) + 0.5 }
+  return { placed, overflow: end > bottom + 0.5 }
 }
 
-/** The page chrome: running head, folio, and the two hairlines. */
+/**
+ * The page chrome: running head, folio, and the two hairlines.
+ *
+ * A leaf with no running head gets **no head rule** — the colophon and the
+ * statement plate are both like that in the file, and drawing a rule with
+ * nothing above it reads as a mistake. The foot rule stays either way.
+ */
 export function paintFurniture(env: LeafEnv): void {
   if (env.leaf.bare) return
   const { ctx, sheet, leaf } = env
@@ -662,20 +729,20 @@ export function paintFurniture(env: LeafEnv): void {
   if (leaf.runningHead) {
     const style = styleFor(TYPE.runningHead)
     applyFont(ctx, sheet, style)
-    drawLines(ctx, sheet, style, [{ text: text(env, leaf.runningHead), opensPara: true }], {
+    drawLines(ctx, sheet, style, wrapText(ctx, text(env, leaf.runningHead), box.w, 0, style), {
       ...box,
       y: sheet.pt(RUNNING_HEAD_Y),
     })
+    if (env.folio !== null) {
+      const folio = styleFor(TYPE.folio, { align: 'right' })
+      applyFont(ctx, sheet, folio)
+      drawLines(ctx, sheet, folio, [{ text: String(env.folio), opensPara: true }], {
+        ...box,
+        y: sheet.pt(RUNNING_HEAD_Y),
+      })
+    }
+    rule(env, box, sheet.pt(HEAD_RULE_Y))
   }
-  if (env.folio !== null) {
-    const style = styleFor(TYPE.folio, { align: 'right' })
-    applyFont(ctx, sheet, style)
-    drawLines(ctx, sheet, style, [{ text: String(env.folio), opensPara: true }], {
-      ...box,
-      y: sheet.pt(RUNNING_HEAD_Y),
-    })
-  }
-  rule(env, box, sheet.pt(HEAD_RULE_Y))
   rule(env, box, sheet.pt(FOOT_RULE_Y))
 }
 
@@ -687,10 +754,15 @@ export function paintSurface(env: LeafEnv): void {
   ctx.fillRect(0, 0, sheet.w, sheet.pt(PAGE_H))
   ctx.restore()
   if (leaf.plate) {
+    // `inset` holds one edge back to the margin so the paper shows as a strip;
+    // the other three still bleed.
+    const m = sheet.pt(MARGIN)
+    const x = leaf.plate.inset === 'left' ? m : 0
+    const right = leaf.plate.inset === 'right' ? sheet.w - m : sheet.w
     drawImage(
       env,
       env.assets.image(leaf.plate.imageRef),
-      { x: 0, y: 0, w: sheet.w, h: sheet.pt(PAGE_H) },
+      { x, y: 0, w: right - x, h: sheet.pt(PAGE_H) },
       leaf.plate.focus,
     )
   }

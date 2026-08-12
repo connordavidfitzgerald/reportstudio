@@ -172,19 +172,20 @@ export const swashFor = (surface: SurfaceId): string =>
   surface === 'pink' ? SURFACES.paper : surface === 'ochre' ? SURFACES.ochre : SURFACES.pink
 
 /**
- * A swash hugs each wrapped line rather than boxing the paragraph, and how tall
- * it is depends on which voice is set in it:
+ * Vertical breathing room on a swash, above the cap line and below the
+ * descender, as a fraction of the font size.
+ *
+ * The bar's *height* is not a constant: it is taken from the font's own ink
+ * extents at render time (see `render/text.ts` → `swashMetrics`), because a
+ * fraction of the em cannot hug both a caps-only display face and a mixed-case
+ * text one. For the record, the ratios measured in the file were:
  *
  *   display  statement 0.836 · TOC chapter 0.833 · quote overlay 0.886
  *   text     TOC sub-row 1.00 · caption 1.03 · cover subtitle 1.089
  *
- * That split is not arbitrary. The display voice is always set in caps (see
- * `TYPE` below), so there are no descenders and the bar hugs the cap height.
- * The text voice has both ascenders and descenders, so its bar takes the whole
- * line box. One constant for both would sit wrong on half the swashes in the
- * document.
+ * — which is the same voice split, arrived at by hand.
  */
-export const SWASH_HEIGHT = { display: 0.85, text: 1.05 } as const
+export const SWASH_PAD_Y = 0.04
 
 /** Horizontal breathing room on a swash, per side. Measured on the TOC rows. */
 export const SWASH_PAD_X = 2

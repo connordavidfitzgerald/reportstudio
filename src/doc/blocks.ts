@@ -190,6 +190,37 @@ export interface FigureBlock extends BlockBase {
   aspect?: number
   /** Cover-fit focal point, 0..1 on each axis. Defaults to centred. */
   focus?: { x: number; y: number }
+  /**
+   * A colour field behind the image, which the image then sits inset on.
+   *
+   * The executive-summary globe is drawn this way: a 515 × 557 pink panel with
+   * a 464pt cut-out centred on it. The panel is the block's full width and the
+   * image is inset by {@link inset} on every side.
+   */
+  panel?: SurfaceId
+  /** Points the image is inset from the panel. Ignored without a panel. */
+  inset?: number
+}
+
+/**
+ * A colour band with text in it, running to the trim.
+ *
+ * The caption on the contents-facing plate is one of these: a pink field from
+ * the left margin to the right edge of the page, 115pt tall, with the text
+ * padded 10pt inside it. It is not a caption on a swash and it does not sit on
+ * the measure — which is exactly why it needs its own kind rather than being
+ * bent out of {@link TextBlock}.
+ */
+export interface BandBlock extends BlockBase {
+  kind: 'band'
+  text: LocalizedText
+  surface: SurfaceId
+  /** Which edges run past the margin to the trim. */
+  bleed?: 'left' | 'right' | 'both' | 'none'
+  /** Points of padding inside the band. */
+  pad?: number
+  /** Body size for the text inside. */
+  size?: BodySizeId
 }
 
 /**
@@ -286,6 +317,7 @@ export type Block =
   | LinksBlock
   | CreditsBlock
   | FigureBlock
+  | BandBlock
   | ChartBlock
   | TocEntryBlock
   | CoverBlock

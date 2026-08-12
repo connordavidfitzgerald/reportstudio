@@ -1,7 +1,15 @@
 import type { Rect } from './types'
-import { ink, SWASH_HEIGHT, SWASH_PAD_X } from '../config/brand'
+import { ink, SWASH_PAD_X } from '../config/brand'
 import type { Sheet } from './sheet'
-import { alignX, applyFont, baselineOffset, cased, lineAdvance, type TextStyle } from './text'
+import {
+  alignX,
+  applyFont,
+  baselineOffset,
+  cased,
+  lineAdvance,
+  swashMetrics,
+  type TextStyle,
+} from './text'
 
 /**
  * Inline layout: a line of type made of runs that don't all look the same.
@@ -129,9 +137,11 @@ export function inlineSwashRects(
   box: Rect,
   /** From {@link inlineBaseline}; the draw pass must be given the same value. */
   base: number,
+  /** From {@link swashMetrics}, so the bar hugs the letterforms. */
+  metrics: { rise: number; height: number },
 ): Rect[] {
   const advance = lineAdvance(sheet, style)
-  const h = sheet.pt(style.size) * SWASH_HEIGHT[style.voice]
+  const { rise, height: h } = metrics
   const pad = sheet.pt(SWASH_PAD_X)
   const out: Rect[] = []
 
@@ -142,7 +152,7 @@ export function inlineSwashRects(
       if (!run) return
       out.push({
         x: originX + run.from - pad,
-        y: box.y + i * advance + base - h,
+        y: box.y + i * advance + base - rise,
         w: run.to - run.from + pad * 2,
         h,
       })
@@ -179,9 +189,9 @@ export function inlineBaseline(
   ctx: CanvasRenderingContext2D,
   sheet: Sheet,
   style: TextStyle,
-): number {
+): { base: number; metrics: { rise: number; height: number } } {
   applyFont(ctx, sheet, style)
-  return baselineOffset(ctx, sheet, style)
+  return { base: baselineOffset(ctx, sheet, style), metrics: swashMetrics(ctx, sheet, style) }
 }
 
 /** Paint inline lines at the baseline from {@link inlineBaseline}. */

@@ -161,15 +161,18 @@ const leaves: Leaf[] = [
     surface: 'pink',
     bodySize: 'xs',
     templateId: 'plate',
-    plate: { imageRef: figmaImage('plate-group') },
+    // Measured: the photograph sits at x40 and bleeds off the other three
+    // edges; the pink band runs from the same margin to the trim.
+    plate: { imageRef: figmaImage('plate-group'), inset: 'left' },
     blocks: [
       b({ kind: 'spacer', height: 'fill' }),
       b({
-        kind: 'para',
-        indent: false,
-        size: 'xs',
-        text:
-          'Funded support structures such as le HUB can play an important role in supporting grassroots climate justice groups in meeting recurring and newly emergent needs, fostering movement connections and dialogue, and helping to synthesise and amplify grassroots knowledge within a long-view of social movement development.',
+        kind: 'band',
+        surface: 'pink',
+        bleed: 'right',
+        pad: 10,
+        size: 'm',
+        text: 'Funded support structures such as le HUB can play an important role in supporting grassroots climate justice groups in meeting recurring and newly emergent needs, fostering movement connections and dialogue, and helping to synthesise and amplify grassroots knowledge within a long-view of social movement development.',
       }),
     ],
   },
@@ -194,6 +197,9 @@ const leaves: Leaf[] = [
     id: 'tfc-statement',
     surface: 'paper',
     bodySize: 'xs',
+    // No running head, no folio and no rules in the file: the statement starts
+    // on the running-head line at y20 and the pink panel carries the page.
+    bare: true,
     templateId: 'statement',
     blocks: [
       b({
@@ -201,7 +207,7 @@ const leaves: Leaf[] = [
         text: 'Le HUB members spoke with 21 organizers from 16 organizations across 6 provinces.',
         highlights: ['21 organizers', '16 organizations', '6 provinces.'],
       }),
-      b({ kind: 'figure', imageRef: figmaImage('globe'), aspect: 0.92 }),
+      b({ kind: 'figure', imageRef: figmaImage('globe'), aspect: 1.082, panel: 'pink', inset: 25 }),
       b({
         kind: 'text',
         role: 'statementNote',
@@ -349,7 +355,7 @@ const leaves: Leaf[] = [
     surface: 'paper',
     bodySize: 'xs',
     blocks: [
-      b({ kind: 'spacer', height: 90 }),
+      b({ kind: 'spacer', height: 123 }),
       b({
         kind: 'figure',
         imageRef: figmaImage('crowd-march'),

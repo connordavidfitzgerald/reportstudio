@@ -36,7 +36,7 @@ const payload = () => ({
 }
 
 // -- older schemas are declined, not mangled -------------------------------
-for (const v of [1, 2, 3]) {
+for (const v of [1, 2, 3, 4]) {
   assert.equal(
     migrate({ v, deck: { pages: [{ id: 'p1', elements: [] }] } }),
     null,

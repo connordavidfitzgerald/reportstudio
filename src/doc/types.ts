@@ -47,10 +47,17 @@ export interface Leaf {
    */
   bodySize: BodySizeId
 
-  /** A full-bleed image behind the content, running to the trim. */
+  /**
+   * A full-bleed image behind the content, running to the trim.
+   *
+   * `inset` holds one edge back to the margin instead, which the contents-
+   * facing plate does on its spine side — the paper shows as a 40pt strip and
+   * the photograph bleeds off the other three edges.
+   */
   plate?: {
     imageRef: ImageRef | null
     focus?: { x: number; y: number }
+    inset?: 'left' | 'right'
   }
 
   /** Paint order — later blocks stack below earlier ones. */
