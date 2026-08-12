@@ -1,20 +1,20 @@
 import fontkit from '@pdf-lib/fontkit'
 import type { PDFDocument, PDFFont } from 'pdf-lib'
-import { DISPLAY_FONT, TEXT_FONT } from '../core/config/fonts'
+import { DISPLAY_FONT, TEXT_FONT } from '../config/fonts'
 
-import displayUrl from '../fonts/ReviewCondensed-Black.otf?url'
-import textUrl from '../fonts/HelveticaNeue-Bold.otf?url'
+import displayUrl from '../fonts/ReviewCondensed-Heavy.otf?url'
+import textUrl from '../fonts/NHaasGroteskDSPro-65Md.otf?url'
 
 /**
  * Embedding the brand fonts in the PDF.
  *
- * Deliberately *not* in `core/config/fonts.ts`: `src/core/` is synced with the
- * poster app and has no business knowing about PDF embedding. The families it
- * declares are the join between the two.
+ * Deliberately *not* in `config/fonts.ts`, which declares the families for the
+ * canvas and has no business knowing about PDF embedding. The family names are
+ * the join between the two.
  *
- * The two urls are the same stand-in files `src/index.css` uses; swapping in the
- * real ReviewCondensed-Heavy and Neue Haas Grotesk means changing them in both
- * places and nowhere else.
+ * These are the same two files `src/index.css` loads. They must stay in step:
+ * embedding a different cut from the one the canvas measured would put every
+ * line break in the PDF somewhere the preview didn't.
  */
 const FONT_FILES: Record<string, string> = {
   [DISPLAY_FONT.family]: displayUrl,

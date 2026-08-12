@@ -1,31 +1,34 @@
-import type { RenderAssets } from './env'
+import type { RenderAssets } from './compose'
 
 /**
- * The shared scratch context used for text measurement.
+ * A 2D context used only for text metrics.
  *
- * `measureText` needs a context, not pixels, so this stays 1×1 forever — all
- * layout math is driven by the width and height arguments passed to
- * `buildPageEnv`, never by the canvas size. One module-level instance so
- * pagination, the editor's hit-test geometry and the exporter all measure
- * against the same object and cannot disagree.
+ * Measurement genuinely needs a real context — `measureText` has no offline
+ * equivalent — but nothing is ever painted into this one. It is 1×1 because its
+ * size is irrelevant to metrics and allocating a full page of backing store to
+ * measure a string would be waste repeated on every re-typeset.
  */
-let scratch: CanvasRenderingContext2D | null = null
+let shared: CanvasRenderingContext2D | null = null
 
 export function measureCtx(): CanvasRenderingContext2D {
-  if (!scratch) {
-    const c = document.createElement('canvas')
-    c.width = 1
-    c.height = 1
-    scratch = c.getContext('2d')!
-  }
-  return scratch
+  if (shared) return shared
+  const canvas = document.createElement('canvas')
+  canvas.width = 1
+  canvas.height = 1
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('[measure] 2D context unavailable')
+  shared = ctx
+  return ctx
 }
 
 /**
- * Assets for a measuring-only pass. Pagination needs a `PageEnv`, but measuring
- * text never touches the logo, the papers or a decoded image — so handing it
- * empty assets is honest rather than a stub, and avoids making page derivation
- * depend on load order.
+ * Assets for a measuring pass.
+ *
+ * Images resolve to null: a measure only needs to know how much room a figure
+ * takes, which is its box, not its pixels. Handing it real bitmaps would make
+ * measurement depend on decode timing.
  */
-const EMPTY_ASSETS: RenderAssets = { logo: null, papers: {}, image: () => null }
-export const renderAssetsForMeasuring = (): RenderAssets => EMPTY_ASSETS
+export const measuringAssets = (): RenderAssets => ({
+  image: () => null,
+  overlays: {},
+})

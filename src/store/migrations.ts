@@ -1,55 +1,41 @@
-import type { Deck, Page } from '../doc/types'
-import type { Section } from '../doc/sections'
+import type { Deck } from '../doc/types'
 
 /**
- * Session schema migrations.
+ * Stored-session schema versions.
  *
- * Deliberately its own module with **type-only imports**, so it can be exercised
- * directly by `scripts/check-migrations.mjs` without dragging in the config and
- * asset graph. A migration bug destroys someone's document silently, weeks after
- * the change that caused it — this is the one part of persistence that should
- * never be verified by reasoning alone.
+ * v1  pages of freely-placed elements (the poster-derived model)
+ * v2  sections — static pages and flow streams
+ * v3  leaves — one A4 page each, spreads derived; the design system rebuilt
+ *     from the Tools for Change file
+ *
+ * ## v3 does not migrate from v1 or v2
+ *
+ * It would be dishonest to try. A v2 document's content is expressed in a
+ * vocabulary that no longer exists — `TextElement` with a `variant` and a grid
+ * `Box`, palette roles, halftone parameters — and there is no mapping from a
+ * notched-outline header on a 12×55 grid onto a block in a nine-column measure
+ * that would produce a page anyone wanted. A migration that ran without error
+ * and produced a scrambled document is worse than one that declines.
+ *
+ * So older sessions are dropped and the editor opens on the seed document. The
+ * only thing lost is unsaved layout work in a design system that has been
+ * deliberately replaced.
  */
+export const CURRENT_VERSION = 3
 
-/** A v1 payload: the deck held `pages` directly, before sections existed. */
-export interface StoredV1 {
-  v: 1
-  deck: Omit<Deck, 'sections'> & { pages: Page[] }
-  currentPageId: string
-}
-
-export interface StoredV2 {
-  v: 2
+export interface StoredV3 {
+  v: 3
   deck: Deck
-  currentPageId: string
+  leafIndex: number
 }
 
-export type StoredAny = StoredV1 | StoredV2
-export const CURRENT_VERSION = 2
+/** Anything that might come out of storage. */
+export type StoredAny = { v?: number } & Record<string, unknown>
 
-/**
- * Bring any stored payload up to the current schema. Steps run in order, each
- * one taking the shape the previous left behind.
- *
- * **v1 → v2** introduced sections. Every v1 page becomes a static section, which
- * is a pure relabelling: a static section *is* its page (see `doc/sections.ts`),
- * so ids, elements, palettes and order carry over untouched and the restored
- * document is identical to the one that was saved.
- */
-export function migrate(raw: StoredAny): StoredV2 {
-  let cur: StoredAny = raw
-
-  if (cur.v === 1) {
-    const { pages, ...deck } = cur.deck
-    cur = {
-      v: 2,
-      deck: {
-        ...deck,
-        sections: (pages ?? []).map((p): Section => ({ ...p, kind: 'static' })),
-      },
-      currentPageId: cur.currentPageId,
-    }
-  }
-
-  return cur as StoredV2
+/** Null when the payload predates v3 and cannot be meaningfully carried over. */
+export function migrate(raw: StoredAny): StoredV3 | null {
+  if (raw?.v !== CURRENT_VERSION) return null
+  const stored = raw as unknown as StoredV3
+  if (!stored.deck || !Array.isArray(stored.deck.leaves)) return null
+  return stored
 }

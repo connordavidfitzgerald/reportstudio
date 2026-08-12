@@ -9,57 +9,34 @@
 }
 
 /*
- * The two brand voices. See src/core/config/fonts.ts.
+ * The two brand voices, as specified by the Tools for Change file. See
+ * src/config/fonts.ts for which roles use which.
  *
- * STAND-INS IN PLACE — both real files are still outstanding:
+ *   display → Review Condensed Heavy
+ *   text    → Neue Haas Grotesk Display Pro, 65 Medium
  *
- *  1. "Review Condensed" should be ReviewCondensed-Heavy (800). We ship
- *     ReviewCondensed-Black (900), which is a touch heavier.
- *  2. "Neue Haas Grotesk" should be NeueHaasGroteskDisplayPro-65Medium (500).
- *     We ship HelveticaNeue-Bold, a cousin at the wrong weight — noticeably
- *     different at chapter-title size.
+ * Both are the real files now. Note the Figma reports the display face as
+ * "Review/Condensed Heavy"; ReviewCondensed-Bold is a lighter sibling in the
+ * same family and is *not* what the file uses.
  *
- * Dropping the real .otf files in src/fonts/ and swapping the two urls below is
- * the whole change; nothing else references the filenames.
+ * `font-display: block` rather than `swap`: every measured line break in the
+ * document depends on these metrics, so a flash of fallback text would lay the
+ * page out wrong and then reflow it.
  */
 @font-face {
     font-family: "Review Condensed";
-    src: url("./fonts/ReviewCondensed-Black.otf") format("opentype");
+    src: url("./fonts/ReviewCondensed-Heavy.otf") format("opentype");
     font-weight: 800;
     font-style: normal;
-    font-display: swap;
+    font-display: block;
 }
 
 @font-face {
     font-family: "Neue Haas Grotesk";
-    src: url("./fonts/HelveticaNeue-Bold.otf") format("opentype");
+    src: url("./fonts/NHaasGroteskDSPro-65Md.otf") format("opentype");
     font-weight: 500;
     font-style: normal;
-    font-display: swap;
-}
-
-@font-face {
-    font-family: "Review Normal";
-    src: url("./fonts/Review-Black.otf") format("opentype");
-    font-weight: 700;
-    font-style: normal;
-    font-display: swap;
-}
-
-@font-face {
-    font-family: "Review Bold";
-    src: url("./fonts/Review-Bold.otf") format("opentype");
-    font-weight: 700;
-    font-style: normal;
-    font-display: swap;
-}
-
-@font-face {
-    font-family: "Helvetica";
-    src: url("./fonts/HelveticaNeue-Bold.otf") format("opentype");
-    font-weight: 700;
-    font-style: normal;
-    font-display: swap;
+    font-display: block;
 }
 
 :root {
@@ -67,8 +44,8 @@
 }
 
 @theme inline {
-    --font-review: "Review Bold";
-    --font-helvetica: "Helvetica";
+    --font-display: "Review Condensed";
+    --font-text: "Neue Haas Grotesk";
     --font-mono: "Neue Montreal Mono";
 }
 

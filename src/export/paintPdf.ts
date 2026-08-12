@@ -1,5 +1,5 @@
 import type { PDFDocument, PDFImage, PDFPage } from 'pdf-lib'
-import type { Rect } from '../core/types'
+import type { Rect } from '../render/types'
 import type { DrawOp } from '../render/record'
 import { setCharacterSpacing } from 'pdf-lib'
 import { parseFont, type FontBook } from './pdfFonts'

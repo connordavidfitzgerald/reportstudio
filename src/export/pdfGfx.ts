@@ -1,5 +1,5 @@
 import { BlendMode, rgb, type Color } from 'pdf-lib'
-import type { Rect } from '../core/types'
+import type { Rect } from '../render/types'
 import type { Point } from '../render/record'
 
 /**

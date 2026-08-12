@@ -1,4 +1,4 @@
-import type { Rect } from '../core/types'
+import type { Rect } from './types'
 
 /**
  * A canvas-shaped recorder that turns drawing into data.

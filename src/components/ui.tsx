@@ -1,16 +1,15 @@
 import { useState, type ReactNode } from 'react'
-import type { SecondaryPos, TextAlign } from './types'
 
 /**
  * The black label chip: Review Bold, uppercase, white on black, 16px / 100%
  * line-height. Shared by section titles, the page title and the artboards label.
  */
 export const labelClass =
-  'block w-fit font-review uppercase text-md leading-none text-black px-2 py-1'
+  'block w-fit font-display uppercase text-md leading-none text-black px-2 py-1'
 
 /** Smaller chip for nested sub-sections (e.g. Header/Text inside Content). */
 export const subLabelClass =
-  'block w-fit font-review text-sm  leading-none text-black px-2.5 py-1'
+  'block w-fit font-display text-sm  leading-none text-black px-2.5 py-1'
 
 export function Section({
   title,
@@ -181,168 +180,6 @@ export function SegmentedDrawer<T extends string>({
       </button>
       {open && segmented}
     </div>
-  )
-}
-
-/** Position icon: outlined rectangle with a filled square at the given corner. */
-export function PositionIcon({ pos }: { pos: SecondaryPos }) {
-  const [vert, horiz] = pos.split('-') as ['top' | 'bottom', 'left' | 'right']
-  const sq = 5
-  const x = horiz === 'left' ? 3 : 24 - sq - 3
-  const y = vert === 'top' ? 3 : 18 - sq - 3
-  return (
-    <svg width={20} height={15} viewBox="0 0 24 18" fill="none">
-      <rect x={1} y={1} width={22} height={16} stroke="currentColor" strokeWidth={1} />
-      <rect x={x} y={y} width={sq} height={sq} fill="currentColor" />
-    </svg>
-  )
-}
-
-/** Standard text-align icon (three lines aligned left / centre / right). */
-export function AlignIcon({ align }: { align: TextAlign }) {
-  const widths = [13, 8, 11]
-  return (
-    <svg width={16} height={12} viewBox="0 0 16 12" fill="none">
-      {widths.map((wLine, i) => {
-        const x = align === 'left' ? 1.5 : align === 'right' ? 14.5 - wLine : (16 - wLine) / 2
-        return <rect key={i} x={x} y={2 + i * 4} width={wLine} height={1.5} fill="currentColor" />
-      })}
-    </svg>
-  )
-}
-
-/** Shared icon frame: a 24×18 outlined artboard, matching the position icons. */
-function IconFrame({ children, outline = true }: { children?: ReactNode; outline?: boolean }) {
-  return (
-    <svg width={20} height={15} viewBox="0 0 24 18" fill="none">
-      {outline && <rect x={1} y={1} width={22} height={16} stroke="currentColor" strokeWidth={1} />}
-      {children}
-    </svg>
-  )
-}
-
-/** Half icon: the top or bottom band of the artboard filled (split text side). */
-export function HalfIcon({ half }: { half: 'top' | 'bottom' }) {
-  return (
-    <IconFrame>
-      <rect x={1} y={half === 'top' ? 1 : 9} width={22} height={8} fill="currentColor" />
-    </IconFrame>
-  )
-}
-
-/**
- * Image-position icon: the image band drawn where it will sit — across the poster
- * at the top or bottom, or down a side at the left or right. The empty
- * part of the frame is where the text reflows to.
- */
-export function ImageAlignIcon({
-  align,
-  axis,
-}: {
-  align: 'start' | 'end'
-  axis: 'vertical' | 'horizontal'
-}) {
-  const at = (start: number, end: number) => (align === 'start' ? start : end)
-  return (
-    <IconFrame>
-      {axis === 'vertical' ? (
-        <rect x={1} y={at(1, 11)} width={22} height={6} fill="currentColor" />
-      ) : (
-        <rect x={at(1, 15)} y={1} width={8} height={16} fill="currentColor" />
-      )}
-    </IconFrame>
-  )
-}
-
-/**
- * Size icon: a filled square of `scale` (0–1 of the box height) centred in the
- * outlined artboard — small square = narrow, big square = full.
- */
-export function SizeIcon({ scale }: { scale: number }) {
-  const s = Math.round(16 * scale)
-  const x = 1 + (22 - s) / 2
-  const y = 1 + (16 - s) / 2
-  return (
-    <IconFrame>
-      <rect x={x} y={y} width={s} height={s} fill="currentColor" />
-    </IconFrame>
-  )
-}
-
-/**
- * Label-position icon (centered layout): the category badge pinned to the top
- * edge, or stacked directly above the centred text lines.
- */
-export function LabelPosIcon({ pos }: { pos: 'top' | 'above' }) {
-  const badgeY = pos === 'top' ? 3 : 6
-  return (
-    <IconFrame>
-      <rect x={8} y={badgeY} width={8} height={2.5} fill="currentColor" />
-      <rect x={6} y={10} width={12} height={1.6} fill="currentColor" />
-      <rect x={8} y={13} width={8} height={1.6} fill="currentColor" />
-    </IconFrame>
-  )
-}
-
-/** Background icon: solid = filled artboard; image = a simple picture glyph. */
-export function BgIcon({ mode }: { mode: 'solid' | 'image' }) {
-  if (mode === 'solid') {
-    return (
-      <IconFrame outline={false}>
-        <rect x={1} y={1} width={22} height={16} fill="currentColor" />
-      </IconFrame>
-    )
-  }
-  return (
-    <IconFrame>
-      <circle cx={7} cy={6} r={2} fill="currentColor" />
-      <path d="M2 16 L9 10 L13 13 L18 7 L22 12 L22 17 L2 17 Z" fill="currentColor" />
-    </IconFrame>
-  )
-}
-
-/** Layout icon: a small glyph for each layout mode, matching the position-icon style. */
-export function LayoutIcon({
-  layout,
-  textHalf = 'top',
-}: {
-  layout: 'split' | 'centered' | 'editorial' | 'generate'
-  /** Split only: which half the text block fills, so the icon previews the swap. */
-  textHalf?: 'top' | 'bottom'
-}) {
-  if (layout === 'split') {
-    return (
-      <IconFrame>
-        <rect x={1} y={textHalf === 'bottom' ? 9 : 1} width={22} height={8} fill="currentColor" />
-      </IconFrame>
-    )
-  }
-  if (layout === 'centered') {
-    return (
-      <IconFrame>
-        {[6, 9, 12].map((y, i) => {
-          const w = [12, 8, 10][i]
-          return <rect key={i} x={(24 - w) / 2} y={y} width={w} height={1.6} fill="currentColor" />
-        })}
-      </IconFrame>
-    )
-  }
-  if (layout === 'editorial') {
-    return (
-      <IconFrame>
-        <rect x={4} y={4} width={9} height={6} fill="currentColor" />
-        <rect x={4} y={12} width={14} height={1.6} fill="currentColor" />
-      </IconFrame>
-    )
-  }
-  // generate: a four-point sparkle.
-  return (
-    <IconFrame outline={false}>
-      <path
-        d="M12 2 C 12.5 7, 13 8, 19 9 C 13 10, 12.5 11, 12 16 C 11.5 11, 11 10, 5 9 C 11 8, 11.5 7, 12 2 Z"
-        fill="currentColor"
-      />
-    </IconFrame>
   )
 }
 

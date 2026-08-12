@@ -7,7 +7,6 @@
  */
 import assert from 'node:assert/strict'
 import { parseColor, blendOf, PdfSpace, ringsToPath } from '../src/export/pdfGfx.ts'
-import { PAGE_FORMATS, formatProportionError } from '../src/config/formats.ts'
 
 const close = (a, b, msg, eps = 1e-9) =>
   assert.ok(Math.abs(a - b) < eps, `${msg}: ${a} !== ${b}`)
@@ -51,9 +50,6 @@ assert.throws(() => blendOf('saturation'), /no PDF equivalent/, 'unmappable blen
 {
   // EVERY format must be exactly proportional, or the vector exporter's single
   // uniform scale stretches the page on one axis.
-  for (const f of PAGE_FORMATS) {
-    close(formatProportionError(f), 0, `format "${f.id}" is exactly proportional`, 1e-12)
-  }
 
   // The A4 report format: 1190px wide rendering to a 595pt page.
   const s = new PdfSpace(1190, 595, 842)

@@ -1,0 +1,129 @@
+import { OVERLAYS, PAGE_H, PAGE_W, SPREAD_W } from '../config/brand'
+import type { Deck, Leaf } from '../doc/types'
+import { folioOf } from '../doc/types'
+import { createRecorder, type DrawOp } from './record'
+import { leafSheet, spreadSheet } from './sheet'
+import {
+  paintBlocks,
+  paintFurniture,
+  paintSurface,
+  type LeafEnv,
+  type PlacedBlock,
+  type RenderAssets,
+} from './compose'
+
+/**
+ * Painting one leaf.
+ *
+ * The single painting implementation: {@link renderLeaf} points it at a real
+ * canvas and {@link recordLeaf} points it at a recorder. Because both go through
+ * `paint`, the PDF cannot disagree with the preview about what is on the page —
+ * there is no second copy of this sequence to fall out of step.
+ */
+
+export interface LeafOptions {
+  quality?: 'full' | 'thumb'
+  /** Index into `deck.leaves`, used to derive the folio. */
+  index?: number
+}
+
+export interface LeafResult {
+  placed: PlacedBlock[]
+  overflow: boolean
+}
+
+function buildEnv(
+  ctx: CanvasRenderingContext2D,
+  leaf: Leaf,
+  deck: Deck,
+  widthPx: number,
+  assets: RenderAssets,
+  opts: LeafOptions,
+): LeafEnv {
+  const index = opts.index ?? deck.leaves.indexOf(leaf)
+  return {
+    ctx,
+    sheet: leaf.full ? spreadSheet(widthPx) : leafSheet(widthPx),
+    leaf,
+    deck,
+    lang: deck.lang,
+    assets,
+    quality: opts.quality ?? 'full',
+    folio: index >= 0 ? folioOf(deck, index) : null,
+  }
+}
+
+/**
+ * The two soft-light washes that sit above everything, including the type.
+ *
+ * Above rather than below: it is what the file does, and it is what stops the
+ * four surfaces reading as flat swatches. In the PDF they composite over vector
+ * text, which keeps the text extractable.
+ *
+ * Skipped on thumbnails — cover-fitting two full-resolution textures into a
+ * 150px box, forty times over, to produce grain nobody can see.
+ */
+function paintOverlays(env: LeafEnv): void {
+  if (env.quality !== 'full') return
+  const { ctx, sheet, assets, deck } = env
+  const w = sheet.w
+  const h = sheet.pt(PAGE_H)
+  for (const overlay of OVERLAYS) {
+    const img = assets.overlays[overlay.id]
+    const opacity = deck.overlayOpacity[overlay.id] ?? overlay.opacity
+    if (!img || opacity <= 0) continue
+    ctx.save()
+    ctx.globalAlpha = opacity
+    ctx.globalCompositeOperation = overlay.blend as GlobalCompositeOperation
+    // The grain is placed rotated in the file — 892 × 595 on a 595 × 842 page —
+    // so it is drawn landscape and cover-fitted rather than stretched upright.
+    const scale = overlay.rotated
+      ? Math.max(w / (h * (892.4 / 595)), h / (w * (595 / 892.4)))
+      : 1
+    const dw = overlay.rotated ? h * (892.4 / 595) * scale : w
+    const dh = overlay.rotated ? w * (595 / 892.4) * scale : h
+    ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh)
+    ctx.restore()
+  }
+}
+
+function paint(env: LeafEnv): LeafResult {
+  paintSurface(env)
+  const { placed, overflow } = paintBlocks(env)
+  paintFurniture(env)
+  paintOverlays(env)
+  return { placed, overflow }
+}
+
+/** Natural pixel width for a leaf at 1:1. Covers are twice as wide. */
+export const leafWidth = (leaf: Leaf): number => (leaf.full ? SPREAD_W : PAGE_W)
+
+/** Draw one leaf into `ctx` at `widthPx` across. */
+export function renderLeaf(
+  ctx: CanvasRenderingContext2D,
+  leaf: Leaf,
+  deck: Deck,
+  widthPx: number,
+  assets: RenderAssets,
+  opts: LeafOptions = {},
+): LeafResult {
+  return paint(buildEnv(ctx, leaf, deck, widthPx, assets, opts))
+}
+
+/**
+ * The same leaf, as data instead of pixels.
+ *
+ * `metrics` must be a real 2D context — text measurement genuinely needs one —
+ * but nothing is ever drawn into it. See `render/record.ts`.
+ */
+export function recordLeaf(
+  metrics: CanvasRenderingContext2D,
+  leaf: Leaf,
+  deck: Deck,
+  widthPx: number,
+  assets: RenderAssets,
+  opts: LeafOptions = {},
+): { ops: DrawOp[] } & LeafResult {
+  const { ctx, ops } = createRecorder(metrics)
+  return { ops, ...paint(buildEnv(ctx, leaf, deck, widthPx, assets, opts)) }
+}

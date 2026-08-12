@@ -1,7 +1,6 @@
 import { useSyncExternalStore } from 'react'
-import { loadImageRef, type ImageRef } from '../core/imageStore'
-import type { Deck, Page } from './types'
-import { deckPages } from './sections'
+import { loadImageRef, type ImageRef } from './imageStore'
+import type { Deck, Leaf } from './types'
 
 /**
  * Decoded images, keyed by reference, living *outside* the document.
@@ -15,7 +14,7 @@ import { deckPages } from './sections'
  * `JSON.stringify`, duplicating a page shares one decode automatically, and
  * there is no rehydration pass to run after a reload.
  *
- * Modelled on `core/hooks/usePaperImages.ts` — module-level cache, published
+ * A module-level cache, published
  * through `useSyncExternalStore` so a component repaints when a load lands.
  */
 
@@ -71,13 +70,21 @@ export function getImage(ref: ImageRef | null): HTMLImageElement | null {
   return null
 }
 
+/** Every image reference on a leaf: its plate, and any figure blocks. */
+function leafRefs(leaf: Leaf): ImageRef[] {
+  const refs: ImageRef[] = []
+  if (leaf.plate?.imageRef) refs.push(leaf.plate.imageRef)
+  for (const block of leaf.blocks) {
+    if (block.kind === 'figure' && block.imageRef) refs.push(block.imageRef)
+  }
+  return refs
+}
+
 /** Every image reference in a deck, de-duplicated. */
 export function collectImageRefs(deck: Deck): ImageRef[] {
   const seen = new Map<string, ImageRef>()
-  for (const page of deckPages(deck)) {
-    for (const { el } of page.items) {
-      if (el.kind === 'image' && el.imageRef) seen.set(refKey(el.imageRef), el.imageRef)
-    }
+  for (const leaf of deck.leaves) {
+    for (const ref of leafRefs(leaf)) seen.set(refKey(ref), ref)
   }
   return [...seen.values()]
 }
@@ -98,11 +105,9 @@ export async function imagesReady(refs: ImageRef[]): Promise<void> {
   await Promise.all(refs.map(preload))
 }
 
-/** Kick off loads for one page, so scrolling to it doesn't wait on a paint. */
-export function preloadPage(page: Page): void {
-  for (const el of page.elements) {
-    if (el.kind === 'image' && el.imageRef) void preload(el.imageRef)
-  }
+/** Kick off loads for one leaf, so scrolling to it doesn't wait on a paint. */
+export function preloadLeaf(leaf: Leaf): void {
+  for (const ref of leafRefs(leaf)) void preload(ref)
 }
 
 const subscribe = (cb: () => void) => {
