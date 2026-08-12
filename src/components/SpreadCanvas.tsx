@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react'
-import { PAGE_H, PAGE_W } from '../config/brand'
+import { useEffect, useRef, useState } from 'react'
+import { PAGE_H, PAGE_W, SPREAD_W } from '../config/brand'
 import { useImageCache } from '../doc/imageCache'
 import type { Deck, Leaf } from '../doc/types'
 import { deckSpreads } from '../doc/types'
@@ -13,11 +13,20 @@ import { useDeck } from '../store/useDeck'
  * The spread view.
  *
  * Two A4 leaves side by side, which is how the document was designed and how it
- * will be read. Each leaf is its own canvas at its own true pixel size, CSS-
- * scaled down together — so the pair share one scale and the gutter between them
- * is a real 0pt butt join rather than a CSS gap pretending to be one.
+ * will be read. The cover is the exception: one canvas across the full 1190.
  *
- * The cover is the exception: one canvas across the full 1190.
+ * ## Why the sizing is done in JS
+ *
+ * A canvas has an intrinsic size (its backing store) *and* a CSS size, and
+ * letting CSS scale the first to the second is what makes canvas text look
+ * soft: on a 2× display, a 595-wide backing store painted into ~1040 device
+ * pixels is being upscaled by nearly two, so every stem is resampled.
+ *
+ * So the CSS size is decided first — by the flex row, from the available height
+ * — and the backing store is then sized to match it *in device pixels*. Text is
+ * rasterised at exactly the resolution it will be displayed at, which is the
+ * only way it comes out crisp. It also means zooming the browser or dragging
+ * the window re-renders at the new resolution rather than resampling.
  */
 
 interface LeafCanvasProps {
@@ -33,26 +42,47 @@ interface LeafCanvasProps {
 function LeafCanvas({ leaf, index, deck, assets, ready, selected, onSelect }: LeafCanvasProps) {
   const ref = useRef<HTMLCanvasElement>(null)
   const imageVersion = useImageCache()
+  /** CSS width of the canvas, in device pixels. Set by the observer below. */
+  const [devicePx, setDevicePx] = useState(0)
+
+  // Track the size the layout actually gave us. There is no circularity here:
+  // the canvas is `width: 100%` of a flex child, so its CSS size comes from the
+  // row, never from its own backing store.
+  useEffect(() => {
+    const canvas = ref.current
+    if (!canvas) return
+    const measure = () => {
+      const cssWidth = canvas.getBoundingClientRect().width
+      if (cssWidth > 0) setDevicePx(Math.round(cssWidth * (window.devicePixelRatio || 1)))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(canvas)
+    window.addEventListener('resize', measure)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [])
 
   useEffect(() => {
     const canvas = ref.current
-    if (!canvas || !ready) return
-    const w = leaf.full ? PAGE_W * 2 : PAGE_W
-    canvas.width = w
-    canvas.height = PAGE_H
+    if (!canvas || !ready || !devicePx) return
+    canvas.width = devicePx
+    canvas.height = Math.round(devicePx * (PAGE_H / (leaf.full ? SPREAD_W : PAGE_W)))
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    const { overflow } = renderLeaf(ctx, leaf, deck, w, assets, { index })
+    ctx.imageSmoothingQuality = 'high'
+    const { overflow } = renderLeaf(ctx, leaf, deck, devicePx, assets, { index })
     canvas.dataset.overflow = overflow ? 'true' : 'false'
-  }, [leaf, deck, assets, ready, index, imageVersion])
+  }, [leaf, deck, assets, ready, index, imageVersion, devicePx])
 
   return (
     <canvas
       ref={ref}
       onClick={onSelect}
-      // The height is what's constrained, since two A4 leaves side by side are
-      // always wider than they are tall.
-      className={`block h-auto max-h-[82vh] w-auto max-w-full cursor-pointer outline-offset-2 ${
+      style={{ aspectRatio: `${leaf.full ? SPREAD_W : PAGE_W} / ${PAGE_H}` }}
+      className={`block h-full w-full min-w-0 cursor-pointer outline-offset-2 ${
         selected ? 'outline outline-2 outline-[#FF669E]' : 'outline outline-1 outline-black/20'
       }`}
     />
@@ -76,9 +106,16 @@ export function SpreadCanvas() {
   const shared = { deck, assets, ready }
 
   return (
-    <div className="flex h-full items-center justify-center overflow-auto p-6">
-      {/* No gap: facing pages meet at the spine, as they do bound. */}
-      <div className="flex items-start">
+    <div className="flex h-full items-center justify-center overflow-hidden p-6">
+      {/*
+        The stage fixes the spread's aspect and lets height drive width, so the
+        pair always fits. Leaves are flex children with no gap — facing pages
+        meet at the spine, as they do bound.
+      */}
+      <div
+        className="flex max-h-full max-w-full items-start"
+        style={{ aspectRatio: `${SPREAD_W} / ${PAGE_H}`, height: '100%' }}
+      >
         {spread.kind === 'full' ? (
           <LeafCanvas
             {...shared}
@@ -96,7 +133,7 @@ export function SpreadCanvas() {
               selected={leafIndex === spread.index}
               onSelect={() => selectLeaf(spread.index)}
             />
-            {spread.right && (
+            {spread.right ? (
               <LeafCanvas
                 {...shared}
                 leaf={spread.right}
@@ -104,6 +141,10 @@ export function SpreadCanvas() {
                 selected={leafIndex === spread.index + 1}
                 onSelect={() => selectLeaf(spread.index + 1)}
               />
+            ) : (
+              // Hold the spine in place on an odd last page, so the verso
+              // doesn't drift to the middle of the stage.
+              <div className="h-full w-full" />
             )}
           </>
         )}

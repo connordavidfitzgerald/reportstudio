@@ -125,15 +125,13 @@ export const GAP = {
 /**
  * The page surfaces.
  *
- * Two paper tints appear in the file, split roughly evenly across the spreads
- * (`#FFFDF2` on the cover and 11396/11397/11398, `#FFF8EC` on 11401 and the
- * right leaves of 11399/11395/11402). Nothing distinguishes their use, so this
- * is read as drift rather than intent: `paper` is the default and `paperWarm`
- * exists so the transcribed spreads can match the file exactly.
+ * Two paper tints appear in the file — `#FFFDF2` on the cover and three
+ * spreads, `#FFF8EC` on four others — with nothing distinguishing their use.
+ * Read as drift rather than intent and collapsed to one on Connor's call, so
+ * there is a single paper in the system.
  */
 export const SURFACES = {
   paper: '#FFFDF2',
-  paperWarm: '#FFF8EC',
   lime: '#99CC00',
   ochre: '#CC9900',
   pink: '#FF669E',
@@ -174,13 +172,19 @@ export const swashFor = (surface: SurfaceId): string =>
   surface === 'pink' ? SURFACES.paper : surface === 'ochre' ? SURFACES.ochre : SURFACES.pink
 
 /**
- * A swash hugs each wrapped line rather than boxing the paragraph, and its
- * height is a fraction of the font size rather than the full line box — the
- * measured values are 0.836 (statement, 41.2 on 49.3) and 0.886 (quote overlay,
- * 26.4 on 29.8). Judgement call: 0.85 splits them and reads correctly at both
- * sizes.
+ * A swash hugs each wrapped line rather than boxing the paragraph, and how tall
+ * it is depends on which voice is set in it:
+ *
+ *   display  statement 0.836 · TOC chapter 0.833 · quote overlay 0.886
+ *   text     TOC sub-row 1.00 · caption 1.03 · cover subtitle 1.089
+ *
+ * That split is not arbitrary. The display voice is always set in caps (see
+ * `TYPE` below), so there are no descenders and the bar hugs the cap height.
+ * The text voice has both ascenders and descenders, so its bar takes the whole
+ * line box. One constant for both would sit wrong on half the swashes in the
+ * document.
  */
-export const SWASH_HEIGHT = 0.85
+export const SWASH_HEIGHT = { display: 0.85, text: 1.05 } as const
 
 /** Horizontal breathing room on a swash, per side. Measured on the TOC rows. */
 export const SWASH_PAD_X = 2
@@ -271,16 +275,30 @@ export interface TypeRole {
  * Note that chapter titles are the *text* voice at 53.8pt, not the display one.
  * That inversion — the biggest type on a body page being the quieter face — is
  * a real signature of the design and easy to get backwards.
+ *
+ * **The display voice is always uppercase.** Every Review Condensed role below
+ * carries `case: 'upper'`, so nothing set in that face can reach the page in
+ * mixed case regardless of how the copy was typed. The one deliberate exception
+ * is {@link TYPE.wordmark} — a logo is not type.
  */
 export const TYPE = {
   // -- page chrome ---------------------------------------------------------
-  runningHead: { voice: 'display', size: 12.6, lineHeight: 1.04, tracking: 0.02 },
-  folio: { voice: 'display', size: 8, lineHeight: 1.04, tracking: 0.02 },
+  runningHead: { voice: 'display', size: 12.6, lineHeight: 1.04, tracking: 0.02, case: 'upper' },
+  folio: { voice: 'display', size: 8, lineHeight: 1.04, tracking: 0.02, case: 'upper' },
 
   // -- cover ---------------------------------------------------------------
   /** 272.8pt in the file, but it is fitted to the spread, not set. */
-  coverTitle: { voice: 'display', lineHeight: 0.8, tracking: 0, autoFit: true },
+  coverTitle: { voice: 'display', lineHeight: 0.8, tracking: 0, autoFit: true, case: 'upper' },
   coverSubtitle: { voice: 'text', size: 37.1, lineHeight: 1.0, tracking: -0.03 },
+  /**
+   * "Le HUB" on the cover.
+   *
+   * The only display-voice role NOT uppercased, because it is a wordmark rather
+   * than a run of type. The file sets it in Review *Black* at 30.4/50%/−4%;
+   * that cut isn't loaded, so Condensed Heavy stands in and the mixed case is
+   * preserved.
+   */
+  wordmark: { voice: 'display', size: 30.4, lineHeight: 0.5, tracking: -0.04 },
 
   // -- contents ------------------------------------------------------------
   tocChapter: { voice: 'display', size: 36, lineHeight: 0.8, tracking: 0, case: 'upper' },
@@ -307,7 +325,7 @@ export const TYPE = {
   credits: { voice: 'text', size: 12.6, lineHeight: 1.04, tracking: 0 },
 
   // -- shouted -------------------------------------------------------------
-  statement: { voice: 'display', size: 49.3, lineHeight: 0.9, tracking: 0.01 },
+  statement: { voice: 'display', size: 49.3, lineHeight: 0.9, tracking: 0.01, case: 'upper' },
   /** The "(Ontario, Quebec, …)" line under a statement. */
   statementNote: { voice: 'display', size: 24, lineHeight: 0.9, tracking: 0.02, case: 'upper' },
   quoteOverlay: {
@@ -324,7 +342,7 @@ export const TYPE = {
    * 71.2 and 74.4 in the file depending on digit count — optically fitted rather
    * than set, so this role fits to its box and 74.4 is only the ceiling.
    */
-  statNumber: { voice: 'display', size: 74.4, lineHeight: 0.9, tracking: 0.01, autoFit: true },
+  statNumber: { voice: 'display', size: 74.4, lineHeight: 0.9, tracking: 0.01, autoFit: true, case: 'upper' },
   statLabel: { voice: 'text', size: 13.2, lineHeight: 1.1, tracking: 0.01 },
   statSublabel: { voice: 'text', size: 13.2, lineHeight: 1.1, tracking: 0.01, alpha: 'muted' },
 } as const satisfies Record<string, TypeRole>

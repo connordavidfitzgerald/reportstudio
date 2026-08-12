@@ -30,9 +30,14 @@ function Thumb({
   useEffect(() => {
     const canvas = ref.current
     if (!canvas || !ready) return
-    const w = leaf.full ? THUMB_W * 2 : THUMB_W
+    // Thumbnails are rasterised at device resolution too — on a 2x display a
+    // 74px backing store upscaled to 148 device pixels is exactly as soft as
+    // the main canvas was.
+    const dpr = window.devicePixelRatio || 1
+    const w = Math.round((leaf.full ? THUMB_W * 2 : THUMB_W) * dpr)
     canvas.width = w
-    canvas.height = Math.round(THUMB_W * (PAGE_H / PAGE_W))
+    canvas.height = Math.round(THUMB_W * dpr * (PAGE_H / PAGE_W))
+    canvas.style.width = `-epx`
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     // `thumb` skips the overlays — grain at 74px is invisible and not free.

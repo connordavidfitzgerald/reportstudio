@@ -113,6 +113,15 @@ export function createBlock(kind: BlockKind): Block {
         folio: 6,
         sections: [{ label: 'participant recruitment', folio: 13 }],
       }
+    case 'cover':
+      return {
+        id,
+        kind,
+        title: 'Tools for\nChange',
+        subtitle: 'Understanding the needs of climate justice organizers in Canada',
+        imageRef: null,
+        wordmark: 'Le HUB',
+      }
     case 'text':
       return { id, kind, text: 'Photo courtesy of —', role: 'caption' }
   }
@@ -170,6 +179,7 @@ export const BLOCK_LABELS: Record<BlockKind, string> = {
   rule: 'Rule',
   spacer: 'Spacer',
   text: 'Caption / small text',
+  cover: 'Cover (full spread)',
 }
 
 export const BLOCK_ORDER = Object.keys(BLOCK_LABELS) as BlockKind[]

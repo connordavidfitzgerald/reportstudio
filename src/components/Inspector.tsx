@@ -39,6 +39,8 @@ function summarise(block: Block, lang: 'en' | 'fr'): string {
       return block.imageRef ? 'image' : 'no image yet'
     case 'tocEntry':
       return `${t(block.label, lang)} · ${block.folio}`
+    case 'cover':
+      return t(block.title, lang).replace(/\n/g, ' ')
     default:
       return t(block.text, lang)
   }
@@ -176,10 +178,7 @@ export function Inspector() {
         <Segmented
           value={leaf.surface}
           onChange={(surface: SurfaceId) => updateLeaf(leafIndex, { surface })}
-          options={(Object.keys(SURFACES) as SurfaceId[]).map((id) => ({
-            value: id,
-            label: id === 'paperWarm' ? 'warm' : id,
-          }))}
+          options={(Object.keys(SURFACES) as SurfaceId[]).map((id) => ({ value: id, label: id }))}
         />
         <div className="mt-2">
           <span className="text-[10px] uppercase tracking-wide text-black/45">Body size</span>

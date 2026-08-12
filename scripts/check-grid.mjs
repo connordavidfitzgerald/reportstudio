@@ -22,6 +22,7 @@ import {
   MEASURE,
   PAGE_H,
   PAGE_W,
+  SWASH_HEIGHT,
   TYPE,
   colSpan,
   colX,
@@ -99,6 +100,37 @@ assert.equal(BODY_INDENT, 64, 'first-line indent is a flat 64pt, not an em multi
     Math.abs(TYPE.defTerm.size - ladder(3)) > 0.5,
     'definition term (20) is a round number, not ladder step 3',
   )
+}
+
+// -- the display voice is always uppercase ----------------------------------
+// Review Condensed is only ever set in caps in the file, and Connor confirmed
+// it as a rule. The wordmark is the single exception, because a logo is not
+// type — if a second exception ever appears, it should have to be argued for
+// here rather than slipped in.
+{
+  const exempt = new Set(['wordmark'])
+  for (const [id, role] of Object.entries(TYPE)) {
+    if (role.voice !== 'display' || exempt.has(id)) continue
+    assert.equal(role.case, 'upper', `display role "${id}" must be uppercase`)
+  }
+  assert.equal(TYPE.wordmark.case, undefined, 'the wordmark stays mixed case')
+}
+
+// -- swash height splits by voice, and that split is measured ---------------
+{
+  const D = SWASH_HEIGHT.display
+  const T = SWASH_HEIGHT.text
+  assert.ok(T > D, 'text swashes are taller than display ones — descenders')
+  // Measured ratios, each within 0.06 of the constant for its voice.
+  const cases = [
+    ['statement', 41.2 / 49.3, D],
+    ['TOC chapter', 30 / 36, D],
+    ['quote overlay', 26.4 / 29.8, D],
+    ['TOC sub-row', 18 / 18, T],
+    ['caption', 13 / 12.6, T],
+    ['cover subtitle', 40.4 / 37.1, T],
+  ]
+  for (const [label, measured, constant] of cases) near(constant, measured, 0.06, `${label} swash`)
 }
 
 console.log('check:grid — ok')

@@ -219,6 +219,31 @@ export interface TocEntryBlock extends BlockBase {
 }
 
 // ---------------------------------------------------------------------------
+// Cover
+// ---------------------------------------------------------------------------
+
+/**
+ * The cover, as one component.
+ *
+ * It is a single block rather than a stack of generic ones because it is the
+ * only page in the document that is genuinely *composed*: the cut-out overlaps
+ * the title, the title bleeds past the margin, and the image runs off the foot
+ * of the page. Expressing that as a flow of blocks would mean inventing
+ * absolute offsets for each part and calling them a stack.
+ *
+ * Its geometry is measured from the file and lives in the painter — see
+ * `render/compose.ts`. Only the content is authored here.
+ */
+export interface CoverBlock extends BlockBase {
+  kind: 'cover'
+  title: LocalizedText
+  subtitle: LocalizedText
+  imageRef: ImageRef | null
+  /** The wordmark at the foot. Set in mixed case, deliberately. */
+  wordmark?: LocalizedText
+}
+
+// ---------------------------------------------------------------------------
 // Generic
 // ---------------------------------------------------------------------------
 
@@ -255,6 +280,7 @@ export type Block =
   | FigureBlock
   | ChartBlock
   | TocEntryBlock
+  | CoverBlock
   | TextBlock
 
 export type BlockKind = Block['kind']

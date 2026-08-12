@@ -447,6 +447,73 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
       return y - box.y
     }
 
+    case 'cover': {
+      // Measured off Frame 11375. These are absolute positions on the 1190 ×
+      // 842 spread, not a stack — see the note on CoverBlock for why the cover
+      // is one component rather than a flow of them.
+      const P = sheet.pt
+      const title = styleFor(TYPE.coverTitle, { align: 'center' })
+      const titleBox = { x: P(20), y: P(7.6), w: P(1150), h: P(436) }
+
+      // Two lines at 272.8/80% fill 436pt exactly. Fit to the longer line so a
+      // retitled cover still spans the spread instead of sitting short.
+      const lines = text(env, block.title)
+        .toUpperCase()
+        .split('\n')
+        .map((l) => ({ text: l, opensPara: true }))
+      const widest = lines.reduce(
+        (acc, l) => {
+          applyFont(ctx, sheet, title)
+          const w = ctx.measureText(l.text).width
+          return w > acc.w ? { text: l.text, w } : acc
+        },
+        { text: '', w: 0 },
+      )
+      // 272.8 is the size in the file; here it is only the ceiling, since the
+      // title fits itself to the spread.
+      const size = fitSize(ctx, sheet, title, widest.text, titleBox.w, 272.8)
+      drawLines(ctx, sheet, { ...title, size }, lines, titleBox)
+
+      // The cut-out sits *over* the title and runs off the foot of the page.
+      // Painted un-cropped and clipped by the page, as the file has it.
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(0, 0, sheet.w, P(PAGE_H))
+      ctx.clip()
+      const img = env.assets.image(block.imageRef)
+      const ir = { x: P(100.7), y: P(345.2), w: P(896.2), h: P(824.1) }
+      if (img && img.width) ctx.drawImage(img, ir.x, ir.y, ir.w, ir.h)
+      else {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.06)'
+        ctx.fillRect(ir.x, ir.y, ir.w, ir.h)
+      }
+      ctx.restore()
+
+      const sub = styleFor(TYPE.coverSubtitle, { align: 'center' })
+      const subBox = { x: P(272.3), y: P(569.4), w: P(645.3), h: 0 }
+      applyFont(ctx, sheet, sub)
+      const subLines = wrapText(ctx, text(env, block.subtitle), subBox.w)
+      drawSwash(ctx, swashRects(ctx, sheet, sub, subLines, subBox), SURFACES.pink)
+      drawLines(ctx, sheet, sub, subLines, subBox)
+
+      if (block.wordmark) {
+        const mark = styleFor(TYPE.wordmark, { align: 'center' })
+        const box = { x: P(539.9), y: P(816.7), w: P(110.1), h: P(25.3) }
+        ctx.save()
+        ctx.fillStyle = SURFACES.pink
+        ctx.fillRect(box.x, box.y, box.w, box.h)
+        ctx.restore()
+        applyFont(ctx, sheet, mark)
+        // Optically centred in the chip rather than sat on its line box: the
+        // wordmark is set at 50% leading, so its line box is half its height.
+        drawLines(ctx, sheet, mark, [{ text: text(env, block.wordmark), opensPara: true }], {
+          ...box,
+          y: box.y + P(4.3),
+        })
+      }
+      return P(PAGE_H) - box.y
+    }
+
     case 'text': {
       const role = typeRole(block.role)
       const style = styleFor(role, {

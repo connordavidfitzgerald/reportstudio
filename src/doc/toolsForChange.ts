@@ -46,14 +46,12 @@ const leaves: Leaf[] = [
     bodySize: 'l',
     templateId: 'cover',
     blocks: [
-      b({ kind: 'text', text: 'TOOLS FOR CHANGE', role: 'statementNote', align: 'center' }),
-      b({ kind: 'figure', imageRef: null, col: 1, span: 7, aspect: 0.55 }),
       b({
-        kind: 'statement',
-        text: 'Understanding the needs of climate justice organizers in Canada',
-        highlights: ['Understanding the needs of climate justice organizers in Canada'],
-        col: 2,
-        span: 5,
+        kind: 'cover',
+        title: 'Tools for\nChange',
+        subtitle: 'Understanding the needs of climate justice organizers in Canada',
+        imageRef: null,
+        wordmark: 'Le HUB',
       }),
     ],
   },
@@ -61,7 +59,7 @@ const leaves: Leaf[] = [
   // -- 2. Colophon | About the author --------------------------------------
   {
     id: 'tfc-colophon',
-    surface: 'paperWarm',
+    surface: 'paper',
     bodySize: 's',
     templateId: 'colophon',
     blocks: [
@@ -91,7 +89,7 @@ const leaves: Leaf[] = [
   },
   {
     id: 'tfc-author',
-    surface: 'paperWarm',
+    surface: 'paper',
     bodySize: 'xs',
     runningHead: 'About the author',
     templateId: 'bio',
@@ -113,7 +111,7 @@ const leaves: Leaf[] = [
   // -- 3. Contents | full-bleed plate --------------------------------------
   {
     id: 'tfc-contents',
-    surface: 'paperWarm',
+    surface: 'paper',
     bodySize: 'xs',
     runningHead: 'Table of contents',
     templateId: 'contents',
@@ -193,7 +191,7 @@ const leaves: Leaf[] = [
   },
   {
     id: 'tfc-statement',
-    surface: 'paperWarm',
+    surface: 'paper',
     bodySize: 'xs',
     templateId: 'statement',
     blocks: [
@@ -426,7 +424,7 @@ const leaves: Leaf[] = [
   },
   {
     id: 'tfc-chart',
-    surface: 'paperWarm',
+    surface: 'paper',
     bodySize: 'xs',
     runningHead: 'Methodology',
     templateId: 'chart',

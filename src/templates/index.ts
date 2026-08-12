@@ -36,14 +36,12 @@ export const TEMPLATES: Template[] = [
       surface: 'paper',
       bodySize: 'l',
       blocks: [
-        b({ kind: 'text', text: 'TOOLS FOR CHANGE', role: 'statementNote', align: 'center' }),
-        b({ kind: 'figure', imageRef: null, col: 1, span: 7, aspect: 0.62 }),
         b({
-          kind: 'statement',
-          text: 'Understanding the needs of climate justice organizers in Canada',
-          highlights: ['Understanding the needs of climate justice organizers in Canada'],
-          col: 2,
-          span: 5,
+          kind: 'cover',
+          title: 'Tools for\nChange',
+          subtitle: 'Understanding the needs of climate justice organizers in Canada',
+          imageRef: null,
+          wordmark: 'Le HUB',
         }),
       ],
     }),
@@ -53,7 +51,7 @@ export const TEMPLATES: Template[] = [
     label: 'Colophon',
     note: 'Spread 2 verso: a short statement high, credits at the foot.',
     build: () => ({
-      surface: 'paperWarm',
+      surface: 'paper',
       bodySize: 's',
       blocks: [
         b({
@@ -83,7 +81,7 @@ export const TEMPLATES: Template[] = [
     label: 'Biography + portrait',
     note: 'Spread 2 recto: text and image both in the outer five columns.',
     build: () => ({
-      surface: 'paperWarm',
+      surface: 'paper',
       bodySize: 'xs',
       runningHead: 'About the author',
       blocks: [
@@ -98,7 +96,7 @@ export const TEMPLATES: Template[] = [
     label: 'Table of contents',
     note: 'Chapter rows on swashes, sub-rows indented, folios ranged right.',
     build: () => ({
-      surface: 'paperWarm',
+      surface: 'paper',
       bodySize: 'xs',
       runningHead: 'Table of contents',
       blocks: [
@@ -137,7 +135,7 @@ export const TEMPLATES: Template[] = [
     label: 'Statement + figure',
     note: 'Spread 4 recto: the shouted number, a plate, and the qualifier.',
     build: () => ({
-      surface: 'paperWarm',
+      surface: 'paper',
       bodySize: 'xs',
       blocks: [
         b({
@@ -210,7 +208,7 @@ export const TEMPLATES: Template[] = [
     label: 'Bar chart',
     note: 'The methodology recto: six proportional bars with fitted percentages.',
     build: () => ({
-      surface: 'paperWarm',
+      surface: 'paper',
       bodySize: 'xs',
       runningHead: 'Methodology',
       blocks: [

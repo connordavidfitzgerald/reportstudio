@@ -217,7 +217,7 @@ export function swashRects(
   const px = sheet.pt(style.size)
   const advance = lineAdvance(sheet, style)
   const base = baselineOffset(ctx, sheet, style)
-  const h = px * SWASH_HEIGHT
+  const h = px * SWASH_HEIGHT[style.voice]
   const pad = sheet.pt(SWASH_PAD_X)
   const out: Rect[] = []
   lines.forEach((line, i) => {

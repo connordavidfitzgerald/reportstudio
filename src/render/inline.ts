@@ -131,7 +131,7 @@ export function inlineSwashRects(
   base: number,
 ): Rect[] {
   const advance = lineAdvance(sheet, style)
-  const h = sheet.pt(style.size) * SWASH_HEIGHT
+  const h = sheet.pt(style.size) * SWASH_HEIGHT[style.voice]
   const pad = sheet.pt(SWASH_PAD_X)
   const out: Rect[] = []
 
