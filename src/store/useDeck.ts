@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Block, BlockId, BlockKind } from '../doc/blocks'
-import { createBlock, createDeck, createLeaf } from '../doc/defaults'
+import { createBlock, createLeaf, seedDeck } from '../doc/defaults'
 import type { Deck, Leaf } from '../doc/types'
 import { deckSpreads, leafId } from '../doc/types'
 import type { Lang } from '../doc/localized'
@@ -91,7 +91,7 @@ export const useDeck = create<DeckState>((set, get) => {
     }))
 
   return {
-    deck: createDeck(),
+    deck: seedDeck(),
     leafIndex: 0,
     selectedBlock: null,
     history: { past: [], future: [] },

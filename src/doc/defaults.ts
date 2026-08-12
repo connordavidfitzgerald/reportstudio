@@ -135,6 +135,17 @@ export const createDeck = (leaves: Leaf[] = [createLeaf()]): Deck => ({
 })
 
 /**
+ * What the editor opens on with no saved session: the *Tools for Change*
+ * transcription, rather than a blank page.
+ *
+ * Opening on the reference document means the design system is visible
+ * immediately and every archetype is one click away to copy — and it keeps the
+ * transcription honest, since a component that regressed would show up on boot
+ * rather than in a test nobody runs.
+ */
+export { toolsForChange as seedDeck } from './toolsForChange'
+
+/**
  * Human labels for the insert menu, in the order they're offered.
  *
  * Ordered by how often the 11 spreads reach for them, not alphabetically: the

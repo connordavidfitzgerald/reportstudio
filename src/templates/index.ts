@@ -1,4 +1,4 @@
-import { blockId, type Block } from '../doc/blocks'
+import { blockId, type Block, type BlockSeed } from '../doc/blocks'
 import type { Leaf } from '../doc/types'
 
 /**
@@ -23,7 +23,7 @@ export interface Template {
   build(): Partial<Leaf>
 }
 
-const b = <T extends Omit<Block, 'id'>>(block: T): Block => ({ ...block, id: blockId() }) as Block
+const b = (block: BlockSeed): Block => ({ ...block, id: blockId() }) as Block
 
 export const TEMPLATES: Template[] = [
   {

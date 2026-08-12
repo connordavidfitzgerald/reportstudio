@@ -260,6 +260,19 @@ export type Block =
 export type BlockKind = Block['kind']
 
 /**
+ * A block without its id — one union member at a time.
+ *
+ * `Omit<Block, 'id'>` looks like it should do this and does something quite
+ * different: `keyof` a union is the *intersection* of its keys, so that
+ * expression collapses to just the fields every kind shares and silently
+ * rejects `text`, `rows`, `series` and the rest. Mapping over the kinds keeps
+ * each member intact, so a seed is checked against its own shape.
+ */
+export type BlockSeed = {
+  [K in BlockKind]: Omit<Extract<Block, { kind: K }>, 'id'>
+}[BlockKind]
+
+/**
  * Blocks that may be split across a leaf boundary.
  *
  * Definition and link lists split *between* rows, never inside one — a term
