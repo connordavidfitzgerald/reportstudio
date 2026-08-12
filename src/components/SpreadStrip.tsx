@@ -37,7 +37,7 @@ function Thumb({
     const w = Math.round((leaf.full ? THUMB_W * 2 : THUMB_W) * dpr)
     canvas.width = w
     canvas.height = Math.round(THUMB_W * dpr * (PAGE_H / PAGE_W))
-    canvas.style.width = `-epx`
+    canvas.style.width = `${leaf.full ? THUMB_W * 2 : THUMB_W}px`
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     // `thumb` skips the overlays — grain at 74px is invisible and not free.

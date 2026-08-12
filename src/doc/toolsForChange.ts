@@ -382,7 +382,6 @@ const leaves: Leaf[] = [
         text:
           'During the summer and fall of 2023, le HUB team members conducted a needs assessment process through in-depth interviews with organizers in climate justice groups across Anglophone Canada. The intent was to hear directly from organizers in the climate justice movement about their current activities and projects, biggest challenges, and ideas for more tailored support and resources from the HUB.',
       }),
-      b({ kind: 'spacer', height: 70 }),
       b({ kind: 'subhead', text: 'Participant recruitment' }),
       b({
         kind: 'para',
@@ -462,7 +461,7 @@ const leaves: Leaf[] = [
         text:
           'At the heart of all organizing and movement building is human relationships and interactions, and actions taken to bring about positive change in the world. To organize is to do together what one cannot achieve alone; organizing is a form of collective action.',
       }),
-      b({ kind: 'spacer', height: 200 }),
+      b({ kind: 'spacer', height: 'fill' }),
       b({ kind: 'rule' }),
       b({
         kind: 'para',

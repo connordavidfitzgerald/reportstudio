@@ -1,6 +1,6 @@
 import type { Deck } from '../doc/types'
 import { createDeck } from '../doc/defaults'
-import { CURRENT_VERSION, migrate, type StoredAny, type StoredV5 } from './migrations'
+import { CURRENT_VERSION, migrate, type StoredAny, type Stored } from './migrations'
 
 /**
  * The storage key, deliberately NOT versioned alongside the schema. Bumping it
@@ -16,7 +16,7 @@ export function saveSession(deck: Deck, leafIndex = 0): void {
   try {
     // A document is plain JSON all the way down — decoded images live in
     // `doc/imageCache.ts`, so there is nothing to strip out first.
-    const json = JSON.stringify({ v: CURRENT_VERSION, deck, leafIndex } satisfies StoredV5)
+    const json = JSON.stringify({ v: CURRENT_VERSION, deck, leafIndex } satisfies Stored)
     if (json.length > MAX_BYTES) {
       console.warn(
         `[session] not saving: ${(json.length / 1e6).toFixed(1)}MB exceeds the ${MAX_BYTES / 1e6}MB limit.`,
@@ -34,7 +34,7 @@ export function saveSession(deck: Deck, leafIndex = 0): void {
  * `migrations.ts` for why those are dropped rather than converted).
  */
 export function loadSession(): Deck | null {
-  let stored: StoredV5 | null
+  let stored: Stored | null
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return null

@@ -34,10 +34,12 @@ import type { Deck } from '../doc/types'
  * Once the transcription settles, this stops moving and real documents start
  * surviving upgrades.
  */
-export const CURRENT_VERSION = 5
+export const CURRENT_VERSION = 6
 
-export interface StoredV5 {
-  v: 5
+/** The current stored payload. Deliberately unversioned in its *name* — the
+ * version lives in the field, and renaming the type on every bump was churn. */
+export interface Stored {
+  v: typeof CURRENT_VERSION
   deck: Deck
   leafIndex: number
 }
@@ -46,9 +48,9 @@ export interface StoredV5 {
 export type StoredAny = { v?: number } & Record<string, unknown>
 
 /** Null when the payload predates the current version and can't be carried over. */
-export function migrate(raw: StoredAny): StoredV5 | null {
+export function migrate(raw: StoredAny): Stored | null {
   if (raw?.v !== CURRENT_VERSION) return null
-  const stored = raw as unknown as StoredV5
+  const stored = raw as unknown as Stored
   if (!stored.deck || !Array.isArray(stored.deck.leaves)) return null
   return stored
 }

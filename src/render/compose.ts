@@ -118,8 +118,21 @@ function rule(env: LeafEnv, box: Rect, y: number): number {
   return h
 }
 
-/** Cover-fit an image into a rect around a focal point. */
-function drawImage(env: LeafEnv, img: HTMLImageElement | null, r: Rect, focus = { x: 0.5, y: 0.5 }): void {
+/**
+ * Draw an image into a rect.
+ *
+ * `cover` fills the rect and crops the overflow — right for a photograph in a
+ * frame, where the frame's proportions are the design. `contain` fits the whole
+ * image inside and centres it, which is what a cut-out needs: cropping a
+ * silhouette just lops a piece off it.
+ */
+function drawImage(
+  env: LeafEnv,
+  img: HTMLImageElement | null,
+  r: Rect,
+  focus = { x: 0.5, y: 0.5 },
+  fit: 'cover' | 'contain' = 'cover',
+): void {
   if (!img || !img.width || !img.height) {
     // A placeholder rather than nothing: an un-decoded image that painted
     // invisibly would look like a layout bug rather than a missing asset.
@@ -129,11 +142,17 @@ function drawImage(env: LeafEnv, img: HTMLImageElement | null, r: Rect, focus = 
     env.ctx.restore()
     return
   }
-  const scale = Math.max(r.w / img.width, r.h / img.height)
+  const scale =
+    fit === 'contain'
+      ? Math.min(r.w / img.width, r.h / img.height)
+      : Math.max(r.w / img.width, r.h / img.height)
   const w = img.width * scale
   const h = img.height * scale
-  const x = r.x + (r.w - w) * focus.x
-  const y = r.y + (r.h - h) * focus.y
+  // A contained image is centred; a covered one is positioned by its focal
+  // point, which is what decides which part of it survives the crop.
+  const at = fit === 'contain' ? { x: 0.5, y: 0.5 } : focus
+  const x = r.x + (r.w - w) * at.x
+  const y = r.y + (r.h - h) * at.y
   env.ctx.save()
   env.ctx.beginPath()
   env.ctx.rect(r.x, r.y, r.w, r.h)
@@ -407,12 +426,16 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
         ctx.fillStyle = SURFACES[block.panel]
         ctx.fillRect(box.x, box.y, w, h)
         ctx.restore()
+        // Contained, not cropped: what sits on a panel is a cut-out, and the
+        // panel is taller than the inset square so the image centres in it —
+        // measured at 44pt above and 49pt below on the executive-summary globe.
         const inset = sheet.pt(block.inset ?? 25)
         drawImage(
           env,
           env.assets.image(block.imageRef),
           { x: box.x + inset, y: box.y + inset, w: w - inset * 2, h: h - inset * 2 },
           block.focus,
+          'contain',
         )
       } else {
         drawImage(env, env.assets.image(block.imageRef), { x: box.x, y: box.y, w, h }, block.focus)
