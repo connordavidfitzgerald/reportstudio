@@ -16,6 +16,7 @@ import {
   RUNNING_HEAD_Y,
   RUNNING_TEXT,
   SET_TEXT,
+  SPREAD_W,
   SURFACES,
   TYPE,
   ink,
@@ -32,6 +33,8 @@ import {
   layoutInline,
   type Segment,
 } from './inline'
+import { createRecorder } from './record'
+import { measureCtx } from './measureCtx'
 import type { Sheet } from './sheet'
 import {
   applyFont,
@@ -149,33 +152,48 @@ function drawImage(env: LeafEnv, img: HTMLImageElement | null, r: Rect, focus = 
  * Every painter is responsible for its own internal spacing and nothing else —
  * the gap *between* blocks belongs to the stacker.
  */
-function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
+interface PaintOpts {
+  /** This block opens the page and hangs off the running-head rule. */
+  hangs?: boolean
+  /**
+   * Height left on the leaf below this block's top, in pixels.
+   *
+   * Only the chart uses it, and only to shrink. Most blocks must *not* respond
+   * to it — a paragraph that reflowed to fit the space left would silently
+   * change its type size depending on what happened to sit above it.
+   */
+  avail?: number
+  /** Height awarded to a `'fill'` spacer. */
+  fill?: number
+}
+
+function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {}): number {
   const { ctx, sheet } = env
 
   switch (block.kind) {
     case 'heading': {
       const style = styleFor(TYPE.chapterTitle)
       applyFont(ctx, sheet, style)
-      return drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w), box)
+      return drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, 0, style), box)
     }
 
     case 'deck': {
       const style = styleFor(TYPE.chapterDeck)
       applyFont(ctx, sheet, style)
-      return drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w), box)
+      return drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, 0, style), box)
     }
 
     case 'sectionHeading': {
       const style = styleFor(TYPE.sectionHeading)
       applyFont(ctx, sheet, style)
-      return drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w), box)
+      return drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, 0, style), box)
     }
 
     case 'para': {
       const style = bodyStyle(env, block.size ? { size: BODY_SIZE[block.size] } : {})
       const indent = block.indent === false ? 0 : sheet.pt(BODY_INDENT)
       applyFont(ctx, sheet, style)
-      return drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, indent), box, indent)
+      return drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, indent, style), box, indent)
     }
 
     case 'quote': {
@@ -185,12 +203,12 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
         tracking: SET_TEXT.tracking,
       })
       applyFont(ctx, sheet, style)
-      let h = drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w), box)
+      let h = drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, 0, style), box)
       if (block.attribution) {
         const attr = styleFor(TYPE.caption, { alpha: 'muted' })
         applyFont(ctx, sheet, attr)
         h += sheet.pt(GAP.tight)
-        h += drawLines(ctx, sheet, attr, wrapText(ctx, `— ${text(env, block.attribution)}`, box.w), {
+        h += drawLines(ctx, sheet, attr, wrapText(ctx, `— ${text(env, block.attribution)}`, box.w, 0, attr), {
           ...box,
           y: box.y + h,
         })
@@ -205,7 +223,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
       const top = rule(env, box, box.y)
       const labelY = box.y + sheet.pt(5.2)
       applyFont(ctx, sheet, style)
-      drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w), { ...box, y: labelY })
+      drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, 0, style), { ...box, y: labelY })
       const h = sheet.pt(23.2)
       rule(env, box, box.y + h)
       return h + top
@@ -215,7 +233,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
       return rule(env, box, box.y)
 
     case 'spacer':
-      return sheet.pt(block.height)
+      return block.height === 'fill' ? (opts.fill ?? 0) : sheet.pt(block.height)
 
     case 'statement': {
       const style = styleFor(TYPE.statement, { alpha: 'strong' })
@@ -229,7 +247,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
         const note = styleFor(TYPE.statementNote)
         h += sheet.pt(GAP.block)
         applyFont(ctx, sheet, note)
-        h += drawLines(ctx, sheet, note, wrapText(ctx, text(env, block.note), box.w), {
+        h += drawLines(ctx, sheet, note, wrapText(ctx, text(env, block.note), box.w, 0, note), {
           ...box,
           y: box.y + h,
         })
@@ -240,7 +258,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
     case 'quoteOverlay': {
       const style = styleFor(TYPE.quoteOverlay, { align: 'center' })
       applyFont(ctx, sheet, style)
-      const lines = wrapText(ctx, text(env, block.text), box.w)
+      const lines = wrapText(ctx, text(env, block.text), box.w, 0, style)
       drawSwash(ctx, swashRects(ctx, sheet, style, lines, box), swashFor(env.leaf.surface))
       return drawLines(ctx, sheet, style, lines, box)
     }
@@ -256,17 +274,23 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
       let y = box.y
       block.rows.forEach((row, i) => {
         if (i > 0) y += sheet.pt(GAP.defRow)
-        y += rule(env, box, y)
-        y += sheet.pt(GAP.tight)
+        // A list that opens a page hangs off the running-head rule instead of
+        // drawing its own — see `hangsFromHeadRule`. Without this the page gets
+        // two hairlines 20pt apart and the first term sits low.
+        if (i === 0 && opts.hangs) y += sheet.pt(GAP.tight)
+        else {
+          y += rule(env, box, y)
+          y += sheet.pt(GAP.tight)
+        }
         applyFont(ctx, sheet, term)
-        const termH = drawLines(ctx, sheet, term, wrapText(ctx, text(env, row.term), termW), {
+        const termH = drawLines(ctx, sheet, term, wrapText(ctx, text(env, row.term), termW, 0, term), {
           x: box.x,
           y,
           w: termW,
           h: 0,
         })
         applyFont(ctx, sheet, def)
-        const defH = drawLines(ctx, sheet, def, wrapText(ctx, text(env, row.def), defW), {
+        const defH = drawLines(ctx, sheet, def, wrapText(ctx, text(env, row.def), defW, 0, def), {
           x: defX,
           y,
           w: defW,
@@ -290,7 +314,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
           const x = box.x + c * (colW + sheet.pt(GAP.block))
           applyFont(ctx, sheet, style)
           drawLines(ctx, sheet, style, [{ text: '•', opensPara: true }], { x, y, w: indent, h: 0 })
-          y += drawLines(ctx, sheet, style, wrapText(ctx, text(env, item), colW - indent), {
+          y += drawLines(ctx, sheet, style, wrapText(ctx, text(env, item), colW - indent, 0, style), {
             x: x + indent,
             y,
             w: colW - indent,
@@ -346,7 +370,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
         const style = styleFor(TYPE.caption)
         used += sheet.pt(GAP.block)
         applyFont(ctx, sheet, style)
-        const lines = wrapText(ctx, text(env, block.caption), w)
+        const lines = wrapText(ctx, text(env, block.caption), w, 0, style)
         const capBox = { ...box, y: box.y + used }
         drawSwash(ctx, swashRects(ctx, sheet, style, lines, capBox), swashFor(env.leaf.surface))
         used += drawLines(ctx, sheet, style, lines, capBox)
@@ -357,8 +381,15 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
     case 'chart': {
       const max = block.max ?? Math.max(...block.series.map((s) => s.value), 1)
       const full = sheet.pt(CHART.barFull)
-      const barH = sheet.pt(CHART.barHeight)
       const gutter = sheet.pt(CHART.gutter)
+      const rowGap = sheet.pt(CHART.rowGap)
+      // Fit the bars to the space left rather than taking the measured 121 come
+      // what may. Six bars at 121 plus their gaps is 763pt against a 745pt
+      // content band — the file's own chart page overruns its foot rule, and a
+      // seventh series would run off the page entirely.
+      const n = block.series.length
+      const room = (opts.avail ?? Infinity) - rowGap * (n - 1)
+      const barH = Math.min(sheet.pt(CHART.barHeight), room / n)
       const num = styleFor(TYPE.statNumber)
       const label = styleFor(TYPE.statLabel)
       let y = box.y
@@ -400,7 +431,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
             h: 0,
           })
         }
-        y += barH + (i < block.series.length - 1 ? sheet.pt(CHART.rowGap) : 0)
+        y += barH + (i < n - 1 ? rowGap : 0)
       })
       return y - box.y
     }
@@ -453,7 +484,10 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
       // is one component rather than a flow of them.
       const P = sheet.pt
       const title = styleFor(TYPE.coverTitle, { align: 'center' })
-      const titleBox = { x: P(20), y: P(7.6), w: P(1150), h: P(436) }
+      // Margin to margin. The file draws it at x20/w1150, i.e. half a margin
+      // proud on each side; squaring it to the 40pt margin costs 3pt of size
+      // and puts the cover on the same measure as every other page.
+      const titleBox = { x: P(MARGIN), y: P(7.6), w: P(SPREAD_W - MARGIN * 2), h: P(436) }
 
       // Two lines at 272.8/80% fill 436pt exactly. Fit to the longer line so a
       // retitled cover still spans the spread instead of sitting short.
@@ -474,8 +508,12 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
       const size = fitSize(ctx, sheet, title, widest.text, titleBox.w, 272.8)
       drawLines(ctx, sheet, { ...title, size }, lines, titleBox)
 
-      // The cut-out sits *over* the title and runs off the foot of the page.
-      // Painted un-cropped and clipped by the page, as the file has it.
+      // The cut-out sits *over* the title — the type is background — and runs
+      // off the foot of the page. Drawn at its natural aspect and clipped by
+      // the page, as the file has it.
+      //
+      // It keeps its alpha, which is the whole point: the title reads through
+      // the gaps around the shape. Do not swap this asset for a JPEG.
       ctx.save()
       ctx.beginPath()
       ctx.rect(0, 0, sheet.w, P(PAGE_H))
@@ -484,7 +522,9 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
       const ir = { x: P(100.7), y: P(345.2), w: P(896.2), h: P(824.1) }
       if (img && img.width) ctx.drawImage(img, ir.x, ir.y, ir.w, ir.h)
       else {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.06)'
+        // Outlined rather than filled: a solid placeholder here would cover
+        // the title and read as "the cover is broken".
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.04)'
         ctx.fillRect(ir.x, ir.y, ir.w, ir.h)
       }
       ctx.restore()
@@ -492,7 +532,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
       const sub = styleFor(TYPE.coverSubtitle, { align: 'center' })
       const subBox = { x: P(272.3), y: P(569.4), w: P(645.3), h: 0 }
       applyFont(ctx, sheet, sub)
-      const subLines = wrapText(ctx, text(env, block.subtitle), subBox.w)
+      const subLines = wrapText(ctx, text(env, block.subtitle), subBox.w, 0, sub)
       drawSwash(ctx, swashRects(ctx, sheet, sub, subLines, subBox), SURFACES.pink)
       drawLines(ctx, sheet, sub, subLines, subBox)
 
@@ -521,7 +561,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect): number {
         align: block.align ?? 'left',
       })
       applyFont(ctx, sheet, style)
-      return drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w), box)
+      return drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, 0, style), box)
     }
   }
 }
@@ -551,21 +591,66 @@ function splitHighlights(raw: string, highlights: string[]): Segment[] {
 // Leaf
 // ---------------------------------------------------------------------------
 
-/** Stack every block down the content column. */
-export function paintBlocks(env: LeafEnv): { placed: PlacedBlock[]; overflow: boolean } {
+/**
+ * Blocks that draw their own leading rule, and so should hang off the
+ * running-head rule when they open a page rather than doubling it.
+ *
+ * The file does this on every definition-list page that has no intro
+ * paragraph: the first term sits 5pt under the head rule at y42, and the row's
+ * own hairline is simply absent. Drawing both would put two rules 20pt apart.
+ */
+const hangsFromHeadRule = (block: Block): boolean => block.kind === 'defList'
+
+/** Run the stack once, painting into `env.ctx`. */
+function stack(env: LeafEnv, fill: number): { placed: PlacedBlock[]; end: number } {
   const { sheet } = env
   const placed: PlacedBlock[] = []
-  let y = env.leaf.bare ? sheet.pt(MARGIN) : sheet.pt(CONTENT_TOP)
+  const first = env.leaf.blocks[0]
+  const hangs = !env.leaf.bare && !!first && hangsFromHeadRule(first)
+
+  let y = env.leaf.bare
+    ? sheet.pt(MARGIN)
+    : hangs
+      ? sheet.pt(HEAD_RULE_Y + RULE_WEIGHT)
+      : sheet.pt(CONTENT_TOP)
 
   env.leaf.blocks.forEach((block, i) => {
     if (i > 0) y += sheet.pt(GAP.block)
     const box = boxFor(env, block, y)
-    const h = paintBlock(env, block, box)
+    const h = paintBlock(env, block, box, {
+      hangs: i === 0 && hangs,
+      avail: sheet.pt(CONTENT_BOTTOM) - y,
+      fill,
+    })
     placed.push({ block, rect: { ...box, h } })
     y += h
   })
 
-  return { placed, overflow: y > sheet.pt(CONTENT_BOTTOM) }
+  return { placed, end: y }
+}
+
+/**
+ * Stack every block down the content column.
+ *
+ * When the leaf has `'fill'` spacers the stack runs twice: once against a
+ * recorder with the fills at zero to find out how much room the real content
+ * needs, then for real with the remainder shared out. The probe uses the same
+ * painters, so what it measures and what gets painted cannot disagree — the one
+ * thing this module is built to guarantee.
+ */
+export function paintBlocks(env: LeafEnv): { placed: PlacedBlock[]; overflow: boolean } {
+  const { sheet } = env
+  const fills = env.leaf.blocks.filter((b) => b.kind === 'spacer' && b.height === 'fill').length
+
+  let fill = 0
+  if (fills > 0) {
+    const probe = createRecorder(measureCtx())
+    const { end } = stack({ ...env, ctx: probe.ctx }, 0)
+    fill = Math.max(0, (sheet.pt(CONTENT_BOTTOM) - end) / fills)
+  }
+
+  const { placed, end } = stack(env, fill)
+  return { placed, overflow: end > sheet.pt(CONTENT_BOTTOM) + 0.5 }
 }
 
 /** The page chrome: running head, folio, and the two hairlines. */
@@ -619,13 +704,8 @@ export function paintSurface(env: LeafEnv): void {
  * disagree with a painted one.
  */
 export function measureBlocks(env: LeafEnv): number[] {
-  const heights: number[] = []
-  let y = env.leaf.bare ? env.sheet.pt(MARGIN) : env.sheet.pt(CONTENT_TOP)
-  for (const block of env.leaf.blocks) {
-    const box = boxFor(env, block, y)
-    const h = paintBlock(env, block, box)
-    heights.push(h)
-    y += h + env.sheet.pt(GAP.block)
-  }
-  return heights
+  // Deliberately delegates rather than re-walking the stack: a second copy of
+  // the advance arithmetic is exactly the drift this module is built to avoid,
+  // and it had already diverged over the hanging first rule.
+  return paintBlocks(env).placed.map((p) => p.rect.h)
 }

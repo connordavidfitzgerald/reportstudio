@@ -1,10 +1,13 @@
-import { useState } from 'react'
-import { BODY_SIZE, SURFACES, type BodySizeId, type SurfaceId } from '../config/brand'
+import { useMemo, useState } from 'react'
+import { BODY_SIZE, PAGE_W, SURFACES, type BodySizeId, type SurfaceId } from '../config/brand'
 import type { Block, BlockKind } from '../doc/blocks'
 import { swashClashes } from '../doc/blocks'
 import { BLOCK_LABELS, BLOCK_ORDER } from '../doc/defaults'
 import { t } from '../doc/localized'
 import { TEMPLATES } from '../templates'
+import { measureCtx, measuringAssets } from '../render/measureCtx'
+import { recordLeaf } from '../render/leaf'
+import { useFontsReady } from '../hooks/useFontsReady'
 import { useCurrentLeaf, useDeck } from '../store/useDeck'
 import { labelClass, Section, Segmented, TextField } from './ui'
 
@@ -24,7 +27,7 @@ function summarise(block: Block, lang: 'en' | 'fr'): string {
     case 'rule':
       return '—'
     case 'spacer':
-      return `${block.height}pt`
+      return block.height === 'fill' ? 'fills remaining space' : `${block.height}pt`
     case 'defList':
       return `${block.rows.length} row${block.rows.length === 1 ? '' : 's'}`
     case 'bulletList':
@@ -136,6 +139,29 @@ function BlockRow({ block, index, count }: { block: Block; index: number; count:
             </select>
           </label>
 
+          {block.kind === 'spacer' && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] uppercase tracking-wide text-black/45">Height</span>
+              <input
+                type="number"
+                min={0}
+                max={700}
+                disabled={block.height === 'fill'}
+                value={block.height === 'fill' ? 0 : block.height}
+                onChange={(e) => updateBlock(block.id, { height: Number(e.target.value) })}
+                className="w-16 border border-black/20 p-1 text-xs disabled:opacity-30"
+              />
+              <label className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-black/45">
+                <input
+                  type="checkbox"
+                  checked={block.height === 'fill'}
+                  onChange={(e) => updateBlock(block.id, { height: e.target.checked ? 'fill' : 40 })}
+                />
+                Fill
+              </label>
+            </div>
+          )}
+
           <div className="flex items-center gap-2">
             <span className="text-[10px] uppercase tracking-wide text-black/45">Columns</span>
             <input
@@ -164,16 +190,47 @@ function BlockRow({ block, index, count }: { block: Block; index: number; count:
   )
 }
 
+/**
+ * Does this page overrun its foot rule?
+ *
+ * Measured by running the real painters against a recorder and throwing the ops
+ * away, so the answer cannot disagree with what is on the canvas.
+ */
+function useOverflow(leaf: ReturnType<typeof useCurrentLeaf>, index: number): boolean {
+  const deck = useDeck((s) => s.deck)
+  const ready = useFontsReady()
+  return useMemo(() => {
+    if (!ready) return false
+    try {
+      return recordLeaf(measureCtx(), leaf, deck, leaf.full ? PAGE_W * 2 : PAGE_W, measuringAssets(), {
+        index,
+      }).overflow
+    } catch {
+      // A measuring failure must never take the editor down with it.
+      return false
+    }
+  }, [leaf, deck, index, ready])
+}
+
 export function Inspector() {
   const leaf = useCurrentLeaf()
   const leafIndex = useDeck((s) => s.leafIndex)
   const updateLeaf = useDeck((s) => s.updateLeaf)
   const addBlock = useDeck((s) => s.addBlock)
   const applyTemplate = useDeck((s) => s.applyTemplate)
+  const resetToSeed = useDeck((s) => s.resetToSeed)
   const [adding, setAdding] = useState(false)
+  const overflow = useOverflow(leaf, leafIndex)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+      {overflow && (
+        <p className="border border-[#B23] px-2 py-1.5 text-[11px] text-[#B23]">
+          This page runs past its foot rule. Shorten the copy, or give a spacer
+          the <em>fill</em> height so the page absorbs the difference.
+        </p>
+      )}
+
       <Section title="Page">
         <Segmented
           value={leaf.surface}
@@ -263,7 +320,18 @@ export function Inspector() {
         )}
       </Section>
 
-      <span className={labelClass}>Le HUB — Report</span>
+      <div className="flex items-center justify-between gap-2 pt-1">
+        <span className={labelClass}>Le HUB — Report</span>
+        <button
+          type="button"
+          onClick={() => {
+            if (confirm('Discard this document and reload the reference report?')) resetToSeed()
+          }}
+          className="border border-black/30 px-2 py-1 text-[10px] uppercase hover:bg-black hover:text-white"
+        >
+          Reset
+        </button>
+      </div>
     </div>
   )
 }

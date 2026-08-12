@@ -1,4 +1,5 @@
 import type { Block, BlockSeed } from './blocks'
+import { figmaImage } from './figmaImages'
 import type { Deck, Leaf } from './types'
 
 /**
@@ -50,7 +51,7 @@ const leaves: Leaf[] = [
         kind: 'cover',
         title: 'Tools for\nChange',
         subtitle: 'Understanding the needs of climate justice organizers in Canada',
-        imageRef: null,
+        imageRef: figmaImage('cover-cutout'),
         wordmark: 'Le HUB',
       }),
     ],
@@ -73,7 +74,7 @@ const leaves: Leaf[] = [
           'The author would like to thank the organizers who participated in interviews for sharing their stories, challenges, and aspirations for the climate justice movement across so-called Canada, and for their tireless work in making the movement what it is.\n' +
           'Any and all errors are of the author.',
       }),
-      b({ kind: 'spacer', height: 330 }),
+      b({ kind: 'spacer', height: 'fill' }),
       b({
         kind: 'credits',
         col: 0,
@@ -103,8 +104,8 @@ const leaves: Leaf[] = [
           'Amanda Harvey-Sánchez (she/her) is a Latina organizer, activist-researcher, and educator. The daughter of a climate scientist and a teacher, Amanda was called into the climate justice movement through working on her campus fossil fuel divestment campaign at the University of Toronto in 2015.\n' +
           'Since then, she has had the opportunity to take part in community-based and justice-focused campaigns and projects across Canada, the US, India, and France. She is currently completing her PhD at the University of Toronto, on the social and political life of climate justice organizing in Canada. She is the HUB’s Activist Resource Person.',
       }),
-      b({ kind: 'spacer', height: 150 }),
-      b({ kind: 'figure', imageRef: null, col: 4, span: 5, aspect: 1.48 }),
+      b({ kind: 'spacer', height: 'fill' }),
+      b({ kind: 'figure', imageRef: figmaImage('portrait-amanda'), col: 4, span: 5, aspect: 1.34 }),
     ],
   },
 
@@ -160,9 +161,9 @@ const leaves: Leaf[] = [
     surface: 'pink',
     bodySize: 'xs',
     templateId: 'plate',
-    plate: { imageRef: null },
+    plate: { imageRef: figmaImage('plate-group') },
     blocks: [
-      b({ kind: 'spacer', height: 690 }),
+      b({ kind: 'spacer', height: 'fill' }),
       b({
         kind: 'para',
         indent: false,
@@ -200,7 +201,7 @@ const leaves: Leaf[] = [
         text: 'Le HUB members spoke with 21 organizers from 16 organizations across 6 provinces.',
         highlights: ['21 organizers', '16 organizations', '6 provinces.'],
       }),
-      b({ kind: 'figure', imageRef: null, aspect: 1.08 }),
+      b({ kind: 'figure', imageRef: figmaImage('globe'), aspect: 0.92 }),
       b({
         kind: 'text',
         role: 'statementNote',
@@ -351,7 +352,7 @@ const leaves: Leaf[] = [
       b({ kind: 'spacer', height: 90 }),
       b({
         kind: 'figure',
-        imageRef: null,
+        imageRef: figmaImage('crowd-march'),
         col: 1,
         span: 7,
         aspect: 1.34,
@@ -471,9 +472,9 @@ const leaves: Leaf[] = [
     bare: true,
     surface: 'ochre',
     bodySize: 'xs',
-    plate: { imageRef: null },
+    plate: { imageRef: figmaImage('plate-street') },
     blocks: [
-      b({ kind: 'spacer', height: 330 }),
+      b({ kind: 'spacer', height: 'fill' }),
       b({
         kind: 'quoteOverlay',
         col: 1,
@@ -481,7 +482,9 @@ const leaves: Leaf[] = [
         text:
           '“There are lots of people who are excited about things, but not a lot of people who are trained in organizing skills, or who know how to develop strategy.”',
       }),
-      b({ kind: 'spacer', height: 300 }),
+      // Two fills split the leftover, which centres the overlay in the plate
+      // and drops the credit to the foot — no measured gap to go stale.
+      b({ kind: 'spacer', height: 'fill' }),
       b({ kind: 'text', role: 'caption', text: 'Photo courtesy of Jacqueline Lee-Tam', col: 4, span: 5 }),
     ],
   },

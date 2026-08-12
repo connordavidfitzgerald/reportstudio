@@ -101,9 +101,19 @@ export function wrapText(
   maxWidth: number,
   /** Indent applied to the opening line of each paragraph. */
   indent = 0,
+  /**
+   * The style, so the run's `case` is applied *before* wrapping.
+   *
+   * It has to happen here rather than at draw time: uppercasing changes every
+   * measured width, so a line wrapped in mixed case and drawn in caps would
+   * overrun its measure. Optional only so the handful of callers that pass
+   * already-cased single lines don't have to.
+   */
+  style?: TextStyle,
 ): WrappedLine[] {
   const out: WrappedLine[] = []
-  for (const para of text.split('\n')) {
+  const source = style ? cased(text, style) : text
+  for (const para of source.split('\n')) {
     if (para.trim() === '') {
       out.push({ text: '', opensPara: true })
       continue

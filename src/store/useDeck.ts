@@ -5,7 +5,7 @@ import type { Deck, Leaf } from '../doc/types'
 import { deckSpreads, leafId } from '../doc/types'
 import type { Lang } from '../doc/localized'
 import { templateById } from '../templates'
-import { loadSession, saveSession } from './session'
+import { clearSession, loadSession, saveSession } from './session'
 
 /**
  * The editor store.
@@ -33,6 +33,8 @@ interface DeckState {
 
   // -- document ------------------------------------------------------------
   setDeck(deck: Deck): void
+  /** Discard the session and reload the reference document. */
+  resetToSeed(): void
   setLang(lang: Lang): void
   setOverlayOpacity(id: string, value: number): void
 
@@ -99,6 +101,12 @@ export const useDeck = create<DeckState>((set, get) => {
     setDeck: (deck) => {
       set({ deck, leafIndex: 0, selectedBlock: null, history: { past: [], future: [] } })
       void saveSession(deck)
+    },
+
+    resetToSeed: () => {
+      clearSession()
+      const deck = seedDeck()
+      set({ deck, leafIndex: 0, selectedBlock: null, history: { past: [], future: [] } })
     },
     setLang: (lang) => commit((deck) => ({ ...deck, lang })),
     setOverlayOpacity: (id, value) =>

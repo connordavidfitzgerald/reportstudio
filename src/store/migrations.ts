@@ -21,10 +21,23 @@ import type { Deck } from '../doc/types'
  * only thing lost is unsaved layout work in a design system that has been
  * deliberately replaced.
  */
-export const CURRENT_VERSION = 3
+/**
+ * v4 exists only to drop v3 sessions.
+ *
+ * The seed document *is* the transcription, and it is still being corrected
+ * against the Figma. A saved session takes precedence over the seed on reload,
+ * so during this phase every fix to the reference pages was invisible behind
+ * whatever had been persisted on the previous visit — which read as the fix
+ * not working. Bumping the version each time the seed changes materially is
+ * the honest way to keep what you see and what the code says in step.
+ *
+ * Once the transcription settles, this stops moving and real documents start
+ * surviving upgrades.
+ */
+export const CURRENT_VERSION = 4
 
-export interface StoredV3 {
-  v: 3
+export interface StoredV4 {
+  v: 4
   deck: Deck
   leafIndex: number
 }
@@ -32,10 +45,10 @@ export interface StoredV3 {
 /** Anything that might come out of storage. */
 export type StoredAny = { v?: number } & Record<string, unknown>
 
-/** Null when the payload predates v3 and cannot be meaningfully carried over. */
-export function migrate(raw: StoredAny): StoredV3 | null {
+/** Null when the payload predates the current version and can't be carried over. */
+export function migrate(raw: StoredAny): StoredV4 | null {
   if (raw?.v !== CURRENT_VERSION) return null
-  const stored = raw as unknown as StoredV3
+  const stored = raw as unknown as StoredV4
   if (!stored.deck || !Array.isArray(stored.deck.leaves)) return null
   return stored
 }

@@ -85,11 +85,19 @@ export interface RuleBlock extends BlockBase {
   kind: 'rule'
 }
 
-/** Vertical air. The file leaves real gaps on the chapter openers. */
+/**
+ * Vertical air. The file leaves real gaps on the chapter openers.
+ *
+ * `'fill'` absorbs whatever is left on the leaf, pushing everything after it to
+ * the foot. Several pages are bottom-aligned that way — the colophon credits,
+ * the author's portrait — and expressing those as a measured gap means the page
+ * silently overruns its foot rule as soon as the copy above grows by a line.
+ * Two fill spacers on one leaf split the remainder between them.
+ */
 export interface SpacerBlock extends BlockBase {
   kind: 'spacer'
-  /** Points. */
-  height: number
+  /** Points, or `'fill'` for whatever is left. */
+  height: number | 'fill'
 }
 
 /**
