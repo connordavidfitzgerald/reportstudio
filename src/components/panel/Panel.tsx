@@ -1,7 +1,6 @@
 import { LANGS, type Lang } from '../../doc/localized'
 import { useSaveState } from '../../store/library'
 import { useCurrentLeaf, useDeck } from '../../store/useDeck'
-import { FirstRun } from '../FirstRun'
 import { UndoRedo } from '../UndoRedo'
 import { labelClass } from '../ui'
 import { ComponentList } from './ComponentList'
@@ -74,7 +73,6 @@ export function Panel() {
 
       <PanelActions />
 
-      <FirstRun />
       {overflow && <OverflowNote culprit={culprit} leafIndex={leafIndex} />}
 
       <section className="flex flex-col gap-5">
