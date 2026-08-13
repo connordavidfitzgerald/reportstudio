@@ -25,12 +25,16 @@ import {
 } from '../config/brand'
 import type { Block } from '../doc/blocks'
 import type { Deck, Leaf } from '../doc/types'
+import { runningHeadOf } from '../doc/types'
 import { t as resolve, type Lang } from '../doc/localized'
+import { markKey, marksAt, toSegments } from '../doc/marks'
 import {
   drawInline,
   inlineBaseline,
+  inlineLinkRects,
   inlineSwashRects,
   layoutInline,
+  segmentRect,
   type Segment,
 } from './inline'
 import { createRecorder } from './record'
@@ -65,6 +69,8 @@ import {
 export interface RenderAssets {
   image(ref: ImageRef | null): HTMLImageElement | null
   overlays: Record<string, HTMLImageElement | null>
+  /** The Le HUB wordmark drawn on the cover; null until the SVG has decoded. */
+  wordmark: HTMLImageElement | null
 }
 
 export interface LeafEnv {
@@ -78,11 +84,56 @@ export interface LeafEnv {
   quality: 'full' | 'thumb'
   /** Printed folio, or null on covers and bare plates. */
   folio: number | null
+  /**
+   * Set only by the interactive canvas, to gather {@link TextRegion}s as the
+   * page is painted. Left undefined everywhere else — thumbnails, the overflow
+   * probe and the PDF export all paint the same pages many times over and none
+   * of them has a caret to place.
+   */
+  collect?: (region: TextRegion) => void
+  /**
+   * Set only by the PDF exporter, to gather the boxes of linked runs.
+   *
+   * A separate collector rather than a new draw op: the recorder
+   * (`render/record.ts`) implements the canvas members the painters use and
+   * throws on anything else *by design*, and a link is not something a canvas
+   * can draw. This is the same seam `collect` uses for text regions.
+   */
+  collectLink?: (link: { href: string; rect: Rect }) => void
 }
 
 export interface PlacedBlock {
   block: Block
   rect: Rect
+}
+
+/** Where a field lives inside its block, e.g. `['rows', 2, 'term']`. */
+export type FieldPath = (string | number)[]
+
+/**
+ * One run of words on the page, and where the painter put it.
+ *
+ * This is what makes the whole document typeable rather than just the blocks
+ * that happen to be a single paragraph. A definition list has six of these, a
+ * chart has two per bar, the cover has two — and each one carries the box it
+ * was drawn in and the style it was drawn with, so a caret can be laid on it
+ * exactly.
+ *
+ * Collected by the painters themselves, as they draw, which is the only way the
+ * answer can't drift: there is no second pass working out where the text
+ * "probably" went.
+ *
+ * Fields holding numbers rather than words — a bar's value, a contents folio —
+ * are deliberately absent. They are typed in the side panel, where they can be
+ * validated as numbers.
+ */
+export interface TextRegion {
+  blockId: string
+  path: FieldPath
+  rect: Rect
+  style: TextStyle
+  /** First-line indent, in points — like every size in {@link TextStyle}. */
+  indent: number
 }
 
 // ---------------------------------------------------------------------------
@@ -96,15 +147,133 @@ const boxFor = (env: LeafEnv, block: Block, y: number): Rect => ({
   h: 0,
 })
 
-const bodyStyle = (env: LeafEnv, over: Partial<TextStyle> = {}): TextStyle => ({
+const bodyStyle = (leaf: Leaf, over: Partial<TextStyle> = {}): TextStyle => ({
   voice: 'text',
-  size: BODY_SIZE[env.leaf.bodySize],
+  size: BODY_SIZE[leaf.bodySize],
   lineHeight: RUNNING_TEXT.lineHeight,
   tracking: RUNNING_TEXT.tracking,
   alpha: 'body',
   align: 'left',
   ...over,
 })
+
+/**
+ * How a block's main run of words is set, for the components that have one.
+ *
+ * One table rather than the same `styleFor(TYPE.x)` expression written out in
+ * each painter, so there is a single place that decides what a chapter title or
+ * a pull quote *is*. The blocks with several runs — a list, a chart, the cover —
+ * return null here and set their own styles inline, because there is no "main"
+ * run to name.
+ *
+ * `indent` is in points, like everything in {@link TextStyle}; the caller
+ * converts through its own sheet.
+ */
+function editableStyle(
+  leaf: Leaf,
+  block: Block,
+): { style: TextStyle; indent: number } | null {
+  const found = editableStyleFor(leaf, block)
+  if (!found || !block.voice || block.voice === found.style.voice) return found
+  // The voice override. Case travels with it because the display face is only
+  // ever set in caps in this design (`config/brand.ts`) — switching a paragraph
+  // to display and leaving it mixed-case reads as a bug, not as a choice.
+  return {
+    ...found,
+    style: {
+      ...found.style,
+      voice: block.voice,
+      case: block.voice === 'display' ? 'upper' : undefined,
+    },
+  }
+}
+
+/** The style a block's kind implies, before any per-block override. */
+function editableStyleFor(
+  leaf: Leaf,
+  block: Block,
+): { style: TextStyle; indent: number } | null {
+  switch (block.kind) {
+    case 'heading':
+      return { style: styleFor(TYPE.chapterTitle), indent: 0 }
+    case 'deck':
+      return { style: styleFor(TYPE.chapterDeck), indent: 0 }
+    case 'sectionHeading':
+      return { style: styleFor(TYPE.sectionHeading), indent: 0 }
+    case 'subhead':
+      return { style: styleFor(TYPE.subhead), indent: 0 }
+    case 'para':
+      return {
+        style: bodyStyle(leaf, block.size ? { size: BODY_SIZE[block.size] } : {}),
+        indent: block.indent === false ? 0 : BODY_INDENT,
+      }
+    case 'quote':
+      return {
+        style: bodyStyle(leaf, {
+          size: BODY_SIZE.m,
+          lineHeight: SET_TEXT.lineHeight,
+          tracking: SET_TEXT.tracking,
+        }),
+        indent: 0,
+      }
+    case 'band':
+      return {
+        style: bodyStyle(leaf, {
+          size: BODY_SIZE[block.size ?? 'm'],
+          lineHeight: SET_TEXT.lineHeight,
+          tracking: SET_TEXT.tracking,
+        }),
+        indent: 0,
+      }
+    case 'statement':
+      return { style: styleFor(TYPE.statement, { alpha: 'strong' }), indent: 0 }
+    case 'quoteOverlay':
+      return { style: styleFor(TYPE.quoteOverlay, { align: 'center' }), indent: 0 }
+    case 'text': {
+      const role = typeRole(block.role)
+      return {
+        style: styleFor(role, {
+          alpha: block.alpha ?? role.alpha ?? 'body',
+          align: block.align ?? 'left',
+        }),
+        indent: 0,
+      }
+    }
+    default:
+      return null
+  }
+}
+
+/**
+ * Does this block have a main run of words at all?
+ *
+ * Exported for the canvas toolbar, so "is this a text component" is answered by
+ * the same table that decides how its text is set rather than by a second list
+ * of kinds that would drift from it.
+ */
+export const hasRunStyle = (leaf: Leaf, block: Block): boolean =>
+  editableStyle(leaf, block) !== null
+
+/** The same, for a painter that already knows the block has one. */
+const runStyle = (env: LeafEnv, block: Block): TextStyle =>
+  editableStyle(env.leaf, block)!.style
+
+/**
+ * Record that `path` was just drawn into `rect`.
+ *
+ * Called from the painters right where the words land, so the region and the
+ * ink come from the same expression. A no-op unless something asked to collect.
+ */
+function mark(
+  env: LeafEnv,
+  block: Block,
+  path: FieldPath,
+  rect: Rect,
+  style: TextStyle,
+  indent = 0,
+): void {
+  env.collect?.({ blockId: block.id, path, rect, style, indent })
+}
 
 const text = (env: LeafEnv, t: Parameters<typeof resolve>[0]): string => resolve(t, env.lang)
 
@@ -186,51 +355,110 @@ interface PaintOpts {
   fill?: number
 }
 
+/**
+ * Paint one field's words, honouring any marks on it, and report where they went.
+ *
+ * The two paths are deliberately not unified. With no marks, this is exactly the
+ * `wrapText` + `drawLines` expression the painters used before rich text existed
+ * — the same calls in the same order — so an unmarked document produces a
+ * byte-identical op list and therefore a byte-identical PDF. That equality is
+ * asserted by `scripts/check-editing.mjs` and is the reason marks could be added
+ * to a transcription of a real report without re-checking every page of it.
+ *
+ * With marks, the field becomes segments and flows through the inline painter,
+ * which already knew how to set a line out of runs that don't match. **The
+ * reported region is the same either way**: marks change the ink inside a field,
+ * not the box it occupies, so the caret needs to know nothing about them.
+ */
+function paintRun(
+  env: LeafEnv,
+  block: Block,
+  path: FieldPath,
+  raw: string,
+  box: Rect,
+  style: TextStyle,
+  /** First-line indent, in points. */
+  indentPt = 0,
+): number {
+  const { ctx, sheet } = env
+  const indent = sheet.pt(indentPt)
+  const marks = marksAt(block.marks, markKey(path), env.lang)
+  applyFont(ctx, sheet, style)
+
+  let h: number
+  if (!marks?.length) {
+    h = drawLines(ctx, sheet, style, wrapText(ctx, raw, box.w, indent, style), box, indent)
+  } else {
+    const segments: Segment[] = toSegments(raw, marks).map((seg) => ({
+      text: seg.text,
+      bold: seg.b,
+      italic: seg.i,
+      // A link is underlined whether or not it was also marked as underlined.
+      // The file's own resources rows are set that way, and a link you cannot
+      // see is one nobody clicks.
+      underline: seg.u || seg.href !== undefined,
+      href: seg.href,
+    }))
+    const lines = layoutInline(ctx, sheet, style, segments, box.w, { indent })
+    const { base } = inlineBaseline(ctx, sheet, style)
+    h = drawInline(ctx, sheet, style, lines, box, base)
+    if (env.collectLink) {
+      for (const link of inlineLinkRects(sheet, style, lines, box)) env.collectLink(link)
+    }
+  }
+  mark(env, block, path, { ...box, h }, style, indentPt)
+  return h
+}
+
+/**
+ * Which components accept bold, italic, underline and links.
+ *
+ * The prose surface, and not the composed ones: a statement's words already
+ * flow as segments carrying a swash, a contents row already sets its label and
+ * folio differently on one line, and threading a second segment model through
+ * those would be two systems deciding the same pixels. The toolbar reads this
+ * so the controls are disabled rather than silently doing nothing.
+ */
+export const supportsMarks = (kind: Block['kind']): boolean =>
+  kind === 'heading' ||
+  kind === 'deck' ||
+  kind === 'sectionHeading' ||
+  kind === 'para' ||
+  kind === 'quote' ||
+  kind === 'text' ||
+  kind === 'defList' ||
+  kind === 'bulletList'
+
 function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {}): number {
   const { ctx, sheet } = env
 
   switch (block.kind) {
-    case 'heading': {
-      const style = styleFor(TYPE.chapterTitle)
-      applyFont(ctx, sheet, style)
-      return drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, 0, style), box)
-    }
+    case 'heading':
+      return paintRun(env, block, ['text'], text(env, block.text), box, runStyle(env, block))
 
-    case 'deck': {
-      const style = styleFor(TYPE.chapterDeck)
-      applyFont(ctx, sheet, style)
-      return drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, 0, style), box)
-    }
+    case 'deck':
+      return paintRun(env, block, ['text'], text(env, block.text), box, runStyle(env, block))
 
-    case 'sectionHeading': {
-      const style = styleFor(TYPE.sectionHeading)
-      applyFont(ctx, sheet, style)
-      return drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, 0, style), box)
-    }
+    case 'sectionHeading':
+      return paintRun(env, block, ['text'], text(env, block.text), box, runStyle(env, block))
 
     case 'para': {
-      const style = bodyStyle(env, block.size ? { size: BODY_SIZE[block.size] } : {})
-      const indent = block.indent === false ? 0 : sheet.pt(BODY_INDENT)
-      applyFont(ctx, sheet, style)
-      return drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, indent, style), box, indent)
+      const edit = editableStyle(env.leaf, block)!
+      return paintRun(env, block, ['text'], text(env, block.text), box, edit.style, edit.indent)
     }
 
     case 'quote': {
-      const style = bodyStyle(env, {
-        size: BODY_SIZE.m,
-        lineHeight: SET_TEXT.lineHeight,
-        tracking: SET_TEXT.tracking,
-      })
+      const style = runStyle(env, block)
       applyFont(ctx, sheet, style)
-      let h = drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, 0, style), box)
+      let h = paintRun(env, block, ['text'], text(env, block.text), box, style)
       if (block.attribution) {
         const attr = styleFor(TYPE.caption, { alpha: 'muted' })
         applyFont(ctx, sheet, attr)
         h += sheet.pt(GAP.tight)
-        h += drawLines(ctx, sheet, attr, wrapText(ctx, `— ${text(env, block.attribution)}`, box.w, 0, attr), {
-          ...box,
-          y: box.y + h,
-        })
+        const attrBox = { ...box, y: box.y + h }
+        const attrH = drawLines(ctx, sheet, attr, wrapText(ctx, `— ${text(env, block.attribution)}`, box.w, 0, attr), attrBox)
+        mark(env, block, ['attribution'], { ...attrBox, h: attrH }, attr)
+        h += attrH
       }
       return h
     }
@@ -238,11 +466,13 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
     case 'subhead': {
       // rule / 5.2pt / label / rule, 23.2pt overall — measured on the
       // methodology plate, where three of these divide the page.
-      const style = styleFor(TYPE.subhead)
+      const style = runStyle(env, block)
       const top = rule(env, box, box.y)
       const labelY = box.y + sheet.pt(5.2)
       applyFont(ctx, sheet, style)
-      drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, 0, style), { ...box, y: labelY })
+      const labelBox = { ...box, y: labelY }
+      const labelH = drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, 0, style), labelBox)
+      mark(env, block, ['text'], { ...labelBox, h: labelH }, style)
       const h = sheet.pt(23.2)
       rule(env, box, box.y + h)
       return h + top
@@ -256,11 +486,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       const right =
         bleed === 'right' || bleed === 'both' ? sheet.w : box.x + box.w
       const pad = sheet.pt(block.pad ?? 10)
-      const style = bodyStyle(env, {
-        size: BODY_SIZE[block.size ?? 'm'],
-        lineHeight: SET_TEXT.lineHeight,
-        tracking: SET_TEXT.tracking,
-      })
+      const style = runStyle(env, block)
       applyFont(ctx, sheet, style)
       const lines = wrapText(ctx, text(env, block.text), right - left - pad * 2, 0, style)
       const h = lines.length * lineAdvance(sheet, style) + pad * 2
@@ -268,12 +494,14 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       ctx.fillStyle = SURFACES[block.surface]
       ctx.fillRect(left, box.y, right - left, h)
       ctx.restore()
-      drawLines(ctx, sheet, style, lines, {
+      const textBox = {
         x: left + pad,
         y: box.y + pad,
         w: right - left - pad * 2,
-        h: 0,
-      })
+        h: h - pad * 2,
+      }
+      drawLines(ctx, sheet, style, lines, textBox)
+      mark(env, block, ['text'], textBox, style)
       return h
     }
 
@@ -284,7 +512,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       return block.height === 'fill' ? (opts.fill ?? 0) : sheet.pt(block.height)
 
     case 'statement': {
-      const style = styleFor(TYPE.statement, { alpha: 'strong' })
+      const style = runStyle(env, block)
       const raw = text(env, block.text)
       const segs = splitHighlights(raw, block.highlights ?? [])
       const lines = layoutInline(ctx, sheet, style, segs, box.w)
@@ -295,24 +523,27 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
         swashFor(env.leaf.surface),
       )
       let h = drawInline(ctx, sheet, style, lines, box, base)
+      mark(env, block, ['text'], { ...box, h }, style)
       if (block.note) {
         const note = styleFor(TYPE.statementNote)
         h += sheet.pt(GAP.block)
         applyFont(ctx, sheet, note)
-        h += drawLines(ctx, sheet, note, wrapText(ctx, text(env, block.note), box.w, 0, note), {
-          ...box,
-          y: box.y + h,
-        })
+        const noteBox = { ...box, y: box.y + h }
+        const noteH = drawLines(ctx, sheet, note, wrapText(ctx, text(env, block.note), box.w, 0, note), noteBox)
+        mark(env, block, ['note'], { ...noteBox, h: noteH }, note)
+        h += noteH
       }
       return h
     }
 
     case 'quoteOverlay': {
-      const style = styleFor(TYPE.quoteOverlay, { align: 'center' })
+      const style = runStyle(env, block)
       applyFont(ctx, sheet, style)
       const lines = wrapText(ctx, text(env, block.text), box.w, 0, style)
       drawSwash(ctx, swashRects(ctx, sheet, style, lines, box), swashFor(env.leaf.surface))
-      return drawLines(ctx, sheet, style, lines, box)
+      const h = drawLines(ctx, sheet, style, lines, box)
+      mark(env, block, ['text'], { ...box, h }, style)
+      return h
     }
 
     case 'defList': {
@@ -334,27 +565,17 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
           y += rule(env, box, y)
           y += sheet.pt(GAP.tight)
         }
-        applyFont(ctx, sheet, term)
-        const termH = drawLines(ctx, sheet, term, wrapText(ctx, text(env, row.term), termW, 0, term), {
-          x: box.x,
-          y,
-          w: termW,
-          h: 0,
-        })
-        applyFont(ctx, sheet, def)
-        const defH = drawLines(ctx, sheet, def, wrapText(ctx, text(env, row.def), defW, 0, def), {
-          x: defX,
-          y,
-          w: defW,
-          h: 0,
-        })
+        const termBox = { x: box.x, y, w: termW, h: 0 }
+        const termH = paintRun(env, block, ['rows', i, 'term'], text(env, row.term), termBox, term)
+        const defBox = { x: defX, y, w: defW, h: 0 }
+        const defH = paintRun(env, block, ['rows', i, 'def'], text(env, row.def), defBox, def)
         y += Math.max(termH, defH)
       })
       return y - box.y
     }
 
     case 'bulletList': {
-      const style = bodyStyle(env, { lineHeight: SET_TEXT.lineHeight })
+      const style = bodyStyle(env.leaf, { lineHeight: SET_TEXT.lineHeight })
       const cols = block.columns ?? 1
       // Columns 0–3 and 5–8, the same split the definition list uses — the file
       // sets its second bullet column at x326 against the grid's 330.
@@ -365,17 +586,14 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       let maxH = 0
       for (let c = 0; c < cols; c += 1) {
         let y = box.y
-        for (const item of block.items.slice(c * perCol, (c + 1) * perCol)) {
+        block.items.slice(c * perCol, (c + 1) * perCol).forEach((item, j) => {
           const x = box.x + c * colStep
           applyFont(ctx, sheet, style)
-          drawLines(ctx, sheet, style, [{ text: '•', opensPara: true }], { x, y, w: indent, h: 0 })
-          y += drawLines(ctx, sheet, style, wrapText(ctx, text(env, item), colW - indent, 0, style), {
-            x: x + indent,
-            y,
-            w: colW - indent,
-            h: 0,
-          })
-        }
+          drawLines(ctx, sheet, style, [{ text: '\u2022', opensPara: true }], { x, y, w: indent, h: 0 })
+          const itemBox = { x: x + indent, y, w: colW - indent, h: 0 }
+          const itemH = paintRun(env, block, ['items', c * perCol + j], text(env, item), itemBox, style)
+          y += itemH
+        })
         maxH = Math.max(maxH, y - box.y)
       }
       return maxH
@@ -384,14 +602,19 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
     case 'links': {
       const style = styleFor(TYPE.link)
       let y = box.y
-      for (const item of block.items) {
-        const segs: Segment[] = [{ text: text(env, item.label), underline: true }]
-        if (item.note) segs.push({ text: ` ${text(env, item.note)}` })
+      block.items.forEach((item, i) => {
+        const segs: Segment[] = [{ text: text(env, item.label), underline: true, id: 'label' }]
+        if (item.note) segs.push({ text: ` ${text(env, item.note)}`, id: 'note' })
         const lines = layoutInline(ctx, sheet, style, segs, box.w)
         const { base } = inlineBaseline(ctx, sheet, style)
-        y += drawInline(ctx, sheet, style, lines, { ...box, y }, base)
+        const rowBox = { ...box, y }
+        y += drawInline(ctx, sheet, style, lines, rowBox, base)
+        for (const [id, key] of [['label', 'label'], ['note', 'note']] as const) {
+          const at = segmentRect(sheet, style, lines, rowBox, id)
+          if (at) mark(env, block, ['items', i, key], at, style)
+        }
         y += sheet.pt(GAP.tight)
-      }
+      })
       return y - box.y - sheet.pt(GAP.tight)
     }
 
@@ -399,9 +622,9 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       const style = styleFor(TYPE.credits)
       const advance = lineAdvance(sheet, style)
       let y = box.y
-      for (const row of block.rows) {
+      block.rows.forEach((row, i) => {
         applyFont(ctx, sheet, style)
-        y += drawLines(
+        const rowH = drawLines(
           ctx,
           sheet,
           style,
@@ -411,8 +634,11 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
           ],
           { ...box, y },
         )
-        y += advance * 0.5
-      }
+        // Two stacked lines, so each field's box is one advance tall.
+        mark(env, block, ['rows', i, 'label'], { ...box, y, h: advance }, style)
+        mark(env, block, ['rows', i, 'value'], { ...box, y: y + advance, h: advance }, style)
+        y += rowH + advance * 0.5
+      })
       return y - box.y
     }
 
@@ -448,7 +674,9 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
         const lines = wrapText(ctx, text(env, block.caption), w, 0, style)
         const capBox = { ...box, y: box.y + used }
         drawSwash(ctx, swashRects(ctx, sheet, style, lines, capBox), swashFor(env.leaf.surface))
-        used += drawLines(ctx, sheet, style, lines, capBox)
+        const capH = drawLines(ctx, sheet, style, lines, capBox)
+        mark(env, block, ['caption'], { ...capBox, h: capH }, style)
+        used += capH
       }
       return used
     }
@@ -490,21 +718,16 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
         })
         let ly = y + sheet.pt(5.6) + numH
         applyFont(ctx, sheet, label)
-        ly += drawLines(ctx, sheet, label, [{ text: text(env, s.label), opensPara: true }], {
-          x: gx,
-          y: ly,
-          w: gw,
-          h: 0,
-        })
+        const labelBox = { x: gx, y: ly, w: gw, h: 0 }
+        const labelH = drawLines(ctx, sheet, label, [{ text: text(env, s.label), opensPara: true }], labelBox)
+        mark(env, block, ['series', i, 'label'], { ...labelBox, h: labelH }, label)
+        ly += labelH
         if (s.sublabel) {
           const sub = styleFor(TYPE.statSublabel)
           applyFont(ctx, sheet, sub)
-          drawLines(ctx, sheet, sub, [{ text: text(env, s.sublabel), opensPara: true }], {
-            x: gx,
-            y: ly,
-            w: gw,
-            h: 0,
-          })
+          const subBox = { x: gx, y: ly, w: gw, h: 0 }
+          const subH = drawLines(ctx, sheet, sub, [{ text: text(env, s.sublabel), opensPara: true }], subBox)
+          mark(env, block, ['series', i, 'sublabel'], { ...subBox, h: subH }, sub)
         }
         y += barH + (i < n - 1 ? rowGap : 0)
       })
@@ -517,21 +740,33 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       const swash = swashFor(env.leaf.surface)
       let y = box.y
 
-      const lines = layoutInline(ctx, sheet, chapter, [{ text: text(env, block.label), swash: true }], box.w)
+      const lines = layoutInline(
+        ctx,
+        sheet,
+        chapter,
+        [{ text: text(env, block.label), swash: true, id: 'label' }],
+        box.w,
+      )
       const { base, metrics } = inlineBaseline(ctx, sheet, chapter)
       drawSwash(ctx, inlineSwashRects(sheet, chapter, lines, box, base, metrics), swash)
       const rowH = drawInline(ctx, sheet, chapter, lines, box, base)
+      mark(env, block, ['label'], { ...box, h: rowH }, chapter)
       applyFont(ctx, sheet, folio)
       drawLines(ctx, sheet, folio, [{ text: String(block.folio), opensPara: true }], { ...box, y })
       y += rowH
 
-      for (const s of block.sections ?? []) {
+      ;(block.sections ?? []).forEach((s, si) => {
         y += sheet.pt(GAP.toc)
         const style = styleFor(TYPE.tocSection)
         const inset = sheet.colX(0) - sheet.colX(0) + sheet.pt(20)
-        const sub: Segment[] = [{ text: text(env, s.label), swash: true }]
+        const sub: Segment[] = [{ text: text(env, s.label), swash: true, id: 'label' }]
         if (s.qualifier) {
-          sub.push({ text: ` ${text(env, s.qualifier)}`, swash: true, size: TYPE.tocQualifier.size })
+          sub.push({
+            text: ` ${text(env, s.qualifier)}`,
+            swash: true,
+            size: TYPE.tocQualifier.size,
+            id: 'qualifier',
+          })
         }
         const subBox = { x: box.x + inset, y, w: box.w - inset, h: 0 }
         const subLines = layoutInline(ctx, sheet, style, sub, subBox.w)
@@ -548,8 +783,12 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
           w: sheet.pt(40),
           h: 0,
         })
+        for (const [id, key] of [['label', 'label'], ['qualifier', 'qualifier']] as const) {
+          const at = segmentRect(sheet, style, subLines, subBox, id)
+          if (at) mark(env, block, ['sections', si, key], at, style)
+        }
         y += subH
-      }
+      })
       return y - box.y
     }
 
@@ -581,7 +820,11 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       // 272.8 is the size in the file; here it is only the ceiling, since the
       // title fits itself to the spread.
       const size = fitSize(ctx, sheet, title, widest.text, titleBox.w, 272.8)
-      drawLines(ctx, sheet, { ...title, size }, lines, titleBox)
+      const titleStyle = { ...title, size }
+      drawLines(ctx, sheet, titleStyle, lines, titleBox)
+      // The fitted size, not the nominal 272.8 — the caret has to sit on the
+      // type as drawn, and the cover's title is sized to the spread.
+      mark(env, block, ['title'], { ...titleBox, h: lines.length * lineAdvance(sheet, titleStyle) }, titleStyle)
 
       // The cut-out sits *over* the title — the type is background — and runs
       // off the foot of the page. Drawn at its natural aspect and clipped by
@@ -609,35 +852,44 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       applyFont(ctx, sheet, sub)
       const subLines = wrapText(ctx, text(env, block.subtitle), subBox.w, 0, sub)
       drawSwash(ctx, swashRects(ctx, sheet, sub, subLines, subBox), SURFACES.pink)
-      drawLines(ctx, sheet, sub, subLines, subBox)
+      const subH = drawLines(ctx, sheet, sub, subLines, subBox)
+      mark(env, block, ['subtitle'], { ...subBox, h: subH }, sub)
 
       if (block.wordmark) {
-        const mark = styleFor(TYPE.wordmark, { align: 'center' })
         const box = { x: P(539.9), y: P(816.7), w: P(110.1), h: P(25.3) }
+        // The chip is painted whether or not the mark is: it is the same pink
+        // as the artwork's own field, so it costs nothing, and it means a cover
+        // that is still decoding reads as the design rather than as a hole.
         ctx.save()
         ctx.fillStyle = SURFACES.pink
         ctx.fillRect(box.x, box.y, box.w, box.h)
         ctx.restore()
-        applyFont(ctx, sheet, mark)
-        // Optically centred in the chip rather than sat on its line box: the
-        // wordmark is set at 50% leading, so its line box is half its height.
-        drawLines(ctx, sheet, mark, [{ text: text(env, block.wordmark), opensPara: true }], {
-          ...box,
-          y: box.y + P(4.3),
-        })
+
+        const logo = env.assets.wordmark
+        if (logo && logo.width) {
+          // The artwork is 277 × 64, the slot 110.1 × 25.3 — a quarter of a
+          // percent apart in aspect, so it is drawn to the measured slot rather
+          // than inset inside it.
+          ctx.drawImage(logo, box.x, box.y, box.w, box.h)
+        } else {
+          // Type stands in only for the beat before the SVG decodes. It is not
+          // the logo: the file's Review *Black* cut isn't loaded, so this is
+          // Condensed Heavy at the same size — see the note on TYPE.wordmark.
+          const mark = styleFor(TYPE.wordmark, { align: 'center' })
+          applyFont(ctx, sheet, mark)
+          // Optically centred in the chip rather than sat on its line box: the
+          // wordmark is set at 50% leading, so its line box is half its height.
+          drawLines(ctx, sheet, mark, [{ text: text(env, block.wordmark), opensPara: true }], {
+            ...box,
+            y: box.y + P(4.3),
+          })
+        }
       }
       return P(PAGE_H) - box.y
     }
 
-    case 'text': {
-      const role = typeRole(block.role)
-      const style = styleFor(role, {
-        alpha: block.alpha ?? role.alpha ?? 'body',
-        align: block.align ?? 'left',
-      })
-      applyFont(ctx, sheet, style)
-      return drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, 0, style), box)
-    }
+    case 'text':
+      return paintRun(env, block, ['text'], text(env, block.text), box, runStyle(env, block))
   }
 }
 
@@ -688,7 +940,7 @@ function stack(env: LeafEnv, fill: number): { placed: PlacedBlock[]; end: number
   //   headed + def-list    43  hangs off the head rule, no rule of its own
   //   no running head      20  no head rule to clear — colophon 23, statement 20
   //   bare plate           20  the caption band and overlay run to the trim
-  const y0 = env.leaf.bare || !env.leaf.runningHead
+  const y0 = env.leaf.bare || !runningHeadOf(env.leaf)
     ? RUNNING_HEAD_Y
     : hangs
       ? HEAD_RULE_Y + RULE_WEIGHT
@@ -729,7 +981,11 @@ export function paintBlocks(env: LeafEnv): { placed: PlacedBlock[]; overflow: bo
   let fill = 0
   if (fills > 0) {
     const probe = createRecorder(measureCtx())
-    const { end } = stack({ ...env, ctx: probe.ctx }, 0)
+    // `collect` is dropped for the probe. It runs the whole stack with the fill
+    // spacers at zero purely to find out how much room is left, so every field
+    // it "draws" is at a y that nothing will be painted at — collecting those
+    // would give the editor two carets per field, one of them in mid-air.
+    const { end } = stack({ ...env, ctx: probe.ctx, collect: undefined }, 0)
     fill = Math.max(0, (bottom - end) / fills)
   }
 
@@ -749,10 +1005,11 @@ export function paintFurniture(env: LeafEnv): void {
   const { ctx, sheet, leaf } = env
   const box = { x: sheet.pt(MARGIN), y: 0, w: sheet.colSpan(sheet.cols), h: 0 }
 
-  if (leaf.runningHead) {
+  const head = runningHeadOf(leaf)
+  if (head) {
     const style = styleFor(TYPE.runningHead)
     applyFont(ctx, sheet, style)
-    drawLines(ctx, sheet, style, wrapText(ctx, text(env, leaf.runningHead), box.w, 0, style), {
+    drawLines(ctx, sheet, style, wrapText(ctx, text(env, head), box.w, 0, style), {
       ...box,
       y: sheet.pt(RUNNING_HEAD_Y),
     })

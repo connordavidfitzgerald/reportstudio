@@ -31,4 +31,5 @@ export function measureCtx(): CanvasRenderingContext2D {
 export const measuringAssets = (): RenderAssets => ({
   image: () => null,
   overlays: {},
+  wordmark: null,
 })

@@ -1,7 +1,7 @@
 import type { ImageRef } from './imageStore'
 import type { BodySizeId, SurfaceId } from '../config/brand'
 import type { Block } from './blocks'
-import type { Lang, LocalizedText } from './localized'
+import { t, type Lang, type LocalizedText } from './localized'
 
 /**
  * A **leaf** is one A4 page. It is the unit the document is authored in and the
@@ -26,13 +26,21 @@ export interface Leaf {
   surface: SurfaceId
 
   /**
-   * The running head, repeated at the top of every leaf in a section.
+   * Which chapter this leaf belongs to: one of {@link CHAPTER_PRESETS} or a
+   * title typed for this document.
    *
-   * Stored per leaf rather than derived from a section title because the file
-   * does exactly that: the exec-summary running head persists onto the
+   * Stored per leaf rather than derived from where the chapter openers fall,
+   * because the file does exactly that: the exec-summary head persists onto the
    * introduction's first leaf. Deriving it would have been tidier and wrong.
    */
-  runningHead?: LocalizedText
+  chapter?: LocalizedText
+
+  /**
+   * The section within the chapter — and, since it is the finer of the two, the
+   * thing that actually prints at the top of the page. Absent means "same as
+   * the chapter". See {@link runningHeadOf}.
+   */
+  section?: LocalizedText
 
   /**
    * Suppress the furniture — running head, folio, both rules. True on the cover
@@ -67,7 +75,43 @@ export interface Leaf {
   templateId?: string
 }
 
+/**
+ * The report's chapters, offered in the panel.
+ *
+ * A list rather than a type: a leaf's `chapter` is free text, and these are the
+ * six the Tools for Change report is built from, offered so the common case is
+ * a click. Typing over one is expected, not an escape hatch.
+ */
+export const CHAPTER_PRESETS = [
+  'Executive Summary',
+  'Introduction',
+  'Methodology',
+  'Findings and Implications',
+  'Conclusion',
+  'Appendix',
+] as const
+
+/**
+ * What prints at the top of a leaf, and whether anything does at all.
+ *
+ * The section is the finer of the two, so it wins; a leaf with no section
+ * carries its chapter's name. **A leaf with neither prints no head, and that is
+ * load-bearing** — `render/compose.ts` starts the content column 37pt higher on
+ * a headless page, so anything that quietly defaults a chapter here would shift
+ * every page of every existing document down.
+ */
+export const runningHeadOf = (leaf: Leaf): LocalizedText | undefined =>
+  leaf.section ?? leaf.chapter
+
 export interface Deck {
+  /**
+   * What this document is called, in the library and in the exported filename.
+   *
+   * Optional because a document written before the library existed has none;
+   * `createDeck` supplies one, so only stored decks ever lack it.
+   */
+  name?: string
+
   /**
    * Which language edition is being typeset. One layout, two PDFs — see
    * `doc/localized.ts`.
@@ -141,8 +185,118 @@ export function folioOf(deck: Deck, index: number): number | null {
   return deck.startFolio + index - covers
 }
 
+/**
+ * What a spread is called: "Pages 3 & 4", "Page 12", "Cover".
+ *
+ * Derived rather than stored, like the pairing itself — and from `folioOf`
+ * rather than the index, so a cover and a bare plate are counted the same way
+ * here as they are on the page.
+ */
+export function spreadLabel(deck: Deck, index: number, kind: 'full' | 'pair'): string {
+  if (kind === 'full') return 'Cover'
+  const left = folioOf(deck, index)
+  const right = folioOf(deck, index + 1)
+  if (left === null && right === null) return 'Pages'
+  if (right === null) return `Page ${left}`
+  if (left === null) return `Page ${right}`
+  return `Pages ${left} & ${right}`
+}
+
+/**
+ * Every chapter this document actually uses, in the order it first uses them.
+ *
+ * Typing a chapter title on one page makes it offerable on every other, which
+ * is the difference between a preset list and a document's own structure — a
+ * report whose chapters aren't the six built in shouldn't require retyping them
+ * page by page.
+ *
+ * Derived rather than stored: the set of chapters *is* the set of names on the
+ * leaves, and keeping a second list beside it would only give the two something
+ * to disagree about. Renaming a chapter on its last page simply removes it.
+ */
+export function chaptersInUse(deck: Deck, lang: Lang): string[] {
+  const seen: string[] = []
+  for (const leaf of deck.leaves) {
+    const name = t(leaf.chapter, lang).trim()
+    if (name && !seen.includes(name)) seen.push(name)
+  }
+  return seen
+}
+
+/**
+ * The sections already used within one chapter.
+ *
+ * Scoped to the chapter rather than the whole document, because a section is a
+ * part *of* a chapter: "Data collection" belongs under Methodology and offering
+ * it under Conclusion would be noise.
+ */
+export function sectionsInChapter(deck: Deck, chapter: string, lang: Lang): string[] {
+  const seen: string[] = []
+  if (!chapter) return seen
+  for (const leaf of deck.leaves) {
+    if (t(leaf.chapter, lang).trim() !== chapter) continue
+    const name = t(leaf.section, lang).trim()
+    if (name && !seen.includes(name)) seen.push(name)
+  }
+  return seen
+}
+
 export const leafById = (deck: Deck, id: string): Leaf | undefined =>
   deck.leaves.find((l) => l.id === id)
+
+/** A blank body leaf: paper, dense body copy, furniture on. */
+export const createLeaf = (over: Partial<Leaf> = {}): Leaf => ({
+  id: leafId(),
+  surface: 'paper',
+  bodySize: 'xs',
+  blocks: [],
+  ...over,
+})
+
+/**
+ * Enforce the one rule about how a document is made of pages.
+ *
+ * **Every leaf is either a full-spread cover or one half of a facing pair.** A
+ * lone A4 cannot exist: the document is read two pages at a time, the editor
+ * shows two pages, the thumbnails are two pages, and `＋` adds two pages — so a
+ * single unpaired leaf was a state the whole interface had no way to draw.
+ *
+ * Rather than asking every mutator to remember this, it is applied in the
+ * store's `commit`, which every change to the document goes through. A verso
+ * left without a recto — by deleting a page, or by turning a middle leaf into a
+ * cover and shifting the pairing after it — is paired with a fresh blank one
+ * here, at the moment it happens.
+ *
+ * Returns the original array untouched when the rule already holds, so the
+ * spread cache and every memo keyed on `leaves` survive an edit that didn't
+ * change the pagination.
+ */
+export function pairLeaves(leaves: Leaf[]): Leaf[] {
+  if (!leaves.length) return [createLeaf(), createLeaf()]
+
+  const out: Leaf[] = []
+  let padded = false
+  for (let i = 0; i < leaves.length; ) {
+    const leaf = leaves[i]
+    if (leaf.full) {
+      out.push(leaf)
+      i += 1
+      continue
+    }
+    const next = leaves[i + 1]
+    // A cover cannot be the right half of a pair, so a leaf followed by one
+    // needs a recto of its own just as much as the last leaf does.
+    if (next && !next.full) {
+      out.push(leaf, next)
+      i += 2
+      continue
+    }
+    out.push(leaf, createLeaf({ surface: leaf.surface }))
+    padded = true
+    i += 1
+  }
+  return padded ? out : leaves
+}
 
 let seq = 0
 export const leafId = (): string => `lf_${Date.now().toString(36)}_${(seq++).toString(36)}`

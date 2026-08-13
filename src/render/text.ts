@@ -1,5 +1,5 @@
 import type { Rect, TextAlign } from './types'
-import { fontFor, fontString } from '../config/fonts'
+import { fontFor, fontString, variantFor } from '../config/fonts'
 import { ink, SWASH_PAD_X, SWASH_PAD_Y, type InkAlphaId, type TypeRole } from '../config/brand'
 import type { Sheet } from './sheet'
 
@@ -21,6 +21,14 @@ export interface TextStyle {
   case?: 'upper' | 'lower'
   alpha: InkAlphaId
   align: TextAlign
+  /**
+   * Which cut of the voice to set in. Set per *segment* by the inline painter
+   * when a field carries marks; absent everywhere else, which is why an
+   * unmarked run produces byte-identical draw ops to the one before rich text
+   * existed.
+   */
+  bold?: boolean
+  italic?: boolean
 }
 
 /** Build a style from a named role, with per-use overrides. */
@@ -41,7 +49,7 @@ export const styleFor = (
 /** Apply a style's font and tracking to a context. Returns the pixel size. */
 export function applyFont(ctx: CanvasRenderingContext2D, sheet: Sheet, style: TextStyle): number {
   const px = sheet.pt(style.size)
-  ctx.font = fontString(fontFor(style.voice), px)
+  ctx.font = fontString(fontFor(style.voice, variantFor(style.bold, style.italic)), px)
   // Canvas letterSpacing is a CSS length, and it affects measureText too — which
   // is exactly why it has to be set before any measuring, not just before
   // drawing. Body copy carries 1% tracking; dropping it makes every measured

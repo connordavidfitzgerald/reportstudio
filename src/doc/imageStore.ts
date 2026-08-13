@@ -8,50 +8,19 @@
  * Decoding a reference back into an element is `doc/imageCache.ts`'s job.
  */
 
+import { tx as idbTx } from '../store/idb'
+
 export type ImageRef = { kind: 'url'; src: string } | { kind: 'blob'; id: string }
 
-const DB_NAME = 'lehub.images.v1'
-const STORE = 'images'
+const DB = { name: 'lehub.images.v1', store: 'images' }
 
 let seq = 0
 const uid = () => `img_${Date.now().toString(36)}_${(seq++).toString(36)}`
 
-/** Open (or create) the database. Resolves null when IndexedDB is unavailable. */
-function openDb(): Promise<IDBDatabase | null> {
-  return new Promise((resolve) => {
-    if (typeof indexedDB === 'undefined') return resolve(null)
-    let req: IDBOpenDBRequest
-    try {
-      req = indexedDB.open(DB_NAME, 1)
-    } catch {
-      return resolve(null) // private mode / storage disabled
-    }
-    req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE)
-    }
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => resolve(null)
-  })
-}
-
-function tx<T>(
+const tx = <T,>(
   mode: IDBTransactionMode,
   run: (store: IDBObjectStore) => IDBRequest<T>,
-): Promise<T | null> {
-  return openDb().then(
-    (db) =>
-      new Promise<T | null>((resolve) => {
-        if (!db) return resolve(null)
-        try {
-          const req = run(db.transaction(STORE, mode).objectStore(STORE))
-          req.onsuccess = () => resolve(req.result)
-          req.onerror = () => resolve(null)
-        } catch {
-          resolve(null)
-        }
-      }),
-  )
-}
+): Promise<T | null> => idbTx(DB, mode, run)
 
 /** Store an uploaded file, returning the reference to keep in the poster state. */
 export async function putImageBlob(blob: Blob): Promise<ImageRef | null> {
@@ -59,6 +28,16 @@ export async function putImageBlob(blob: Blob): Promise<ImageRef | null> {
   const ok = await tx('readwrite', (s) => s.put(blob, id) as IDBRequest<IDBValidKey>)
   return ok === null ? null : { kind: 'blob', id }
 }
+
+/**
+ * The stored bytes for an upload, or null if it is gone.
+ *
+ * `loadImageRef` below decodes to an element, which is what the renderer wants;
+ * this returns the blob itself, which is what the `.lehub.json` transfer format
+ * needs in order to carry an image to another machine.
+ */
+export const getImageBlob = (id: string): Promise<Blob | null> =>
+  tx('readonly', (s) => s.get(id) as IDBRequest<Blob | undefined>).then((b) => b ?? null)
 
 /** Drop every stored upload that no page references any more. */
 export async function pruneImageBlobs(keep: Iterable<string>): Promise<void> {

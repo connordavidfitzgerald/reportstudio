@@ -1,6 +1,9 @@
 import { blockId, type Block, type BlockSeed } from '../doc/blocks'
 import type { Leaf } from '../doc/types'
 
+/** Spelled as in `CHAPTER_PRESETS`, so the panel marks it as the current one. */
+const FINDINGS = 'Findings and Implications'
+
 /**
  * Page archetypes, derived from the 11 spreads rather than invented.
  *
@@ -27,8 +30,14 @@ const b = (block: BlockSeed): Block => ({ ...block, id: blockId() }) as Block
 
 export const TEMPLATES: Template[] = [
   {
+    id: 'blank',
+    label: 'Blank',
+    note: 'An empty page, to build up from components.',
+    build: () => ({ surface: 'paper', bodySize: 'xs', blocks: [] }),
+  },
+  {
     id: 'cover',
-    label: 'Cover (full spread)',
+    label: 'Cover',
     note: 'The only page composed across the gutter.',
     build: () => ({
       full: true,
@@ -77,13 +86,14 @@ export const TEMPLATES: Template[] = [
     }),
   },
   {
-    id: 'bio',
-    label: 'Biography + portrait',
+    id: 'author',
+    label: 'Author',
     note: 'Spread 2 recto: text and image both in the outer five columns.',
     build: () => ({
       surface: 'paper',
       bodySize: 'xs',
-      runningHead: 'About the author',
+      chapter: 'Introduction',
+      section: 'About the author',
       blocks: [
         b({ kind: 'para', indent: false, col: 4, span: 5, text: 'Biography.' }),
         b({ kind: 'spacer', height: 160 }),
@@ -92,13 +102,13 @@ export const TEMPLATES: Template[] = [
     }),
   },
   {
-    id: 'contents',
-    label: 'Table of contents',
+    id: 'tableOfContents',
+    label: 'Table of Contents',
     note: 'Chapter rows on swashes, sub-rows indented, folios ranged right.',
     build: () => ({
       surface: 'paper',
       bodySize: 'xs',
-      runningHead: 'Table of contents',
+      chapter: 'Table of contents',
       blocks: [
         b({ kind: 'tocEntry', label: 'Executive summary', folio: 6 }),
         b({ kind: 'tocEntry', label: 'Introduction', folio: 12 }),
@@ -132,7 +142,7 @@ export const TEMPLATES: Template[] = [
   },
   {
     id: 'statement',
-    label: 'Statement + figure',
+    label: 'Statement',
     note: 'Spread 4 recto: the shouted number, a plate, and the qualifier.',
     build: () => ({
       surface: 'paper',
@@ -155,7 +165,7 @@ export const TEMPLATES: Template[] = [
     build: () => ({
       surface: 'paper',
       bodySize: 'xs',
-      runningHead: 'Executive summary',
+      chapter: 'Executive Summary',
       blocks: [
         b({
           kind: 'defList',
@@ -169,13 +179,14 @@ export const TEMPLATES: Template[] = [
     }),
   },
   {
-    id: 'chapter',
-    label: 'Chapter opener',
+    id: 'newChapter',
+    label: 'New Chapter',
     note: 'Title, definition, then body low on the page.',
     build: () => ({
       surface: 'ochre',
       bodySize: 's',
-      runningHead: 'Doing (campaigns/actions)',
+      chapter: FINDINGS,
+      section: 'Doing (campaigns/actions)',
       blocks: [
         b({ kind: 'heading', text: 'Campaign Development' }),
         b({ kind: 'deck', text: 'The process of ideating, developing, and carrying out a campaign.' }),
@@ -192,7 +203,7 @@ export const TEMPLATES: Template[] = [
     build: () => ({
       surface: 'paper',
       bodySize: 'xs',
-      runningHead: 'Methodology',
+      chapter: 'Methodology',
       blocks: [
         b({ kind: 'para', indent: false, size: 'm', text: 'Opening statement.' }),
         b({ kind: 'spacer', height: 60 }),
@@ -210,7 +221,7 @@ export const TEMPLATES: Template[] = [
     build: () => ({
       surface: 'paper',
       bodySize: 'xs',
-      runningHead: 'Methodology',
+      chapter: 'Methodology',
       blocks: [
         b({
           kind: 'chart',
@@ -228,12 +239,13 @@ export const TEMPLATES: Template[] = [
   },
   {
     id: 'resources',
-    label: 'Quote + resources',
+    label: 'Resources',
     note: 'Spread 11 recto: an inset quote, then linked resources.',
     build: () => ({
       surface: 'ochre',
       bodySize: 'm',
-      runningHead: 'Doing (campaigns/actions)',
+      chapter: FINDINGS,
+      section: 'Doing (campaigns/actions)',
       blocks: [
         b({ kind: 'quote', col: 1, span: 7, text: '“Quotation.”' }),
         b({ kind: 'rule' }),
@@ -259,4 +271,38 @@ export const TEMPLATES: Template[] = [
   },
 ]
 
-export const templateById = (id: string): Template | undefined => TEMPLATES.find((t) => t.id === id)
+/**
+ * The templates the panel offers, in the order the Figma lists them.
+ *
+ * The rest are not deleted. `plate`, `defList`, `methodology`, `chart` and
+ * `body` still build the pages the transcription is made of and are still named
+ * by saved leaves' `templateId`; they are simply not shapes anyone should be
+ * starting a new page from, now that a page is built up from components.
+ */
+const OFFERED = [
+  'author',
+  'blank',
+  'cover',
+  'colophon',
+  'newChapter',
+  'resources',
+  'statement',
+  'tableOfContents',
+] as const
+
+export const OFFERED_TEMPLATES: Template[] = OFFERED.map(
+  (id) => TEMPLATES.find((t) => t.id === id)!,
+)
+
+/**
+ * Ids that were renamed when the list was cut down, so a leaf saved under the
+ * old name still resolves to its template rather than silently losing it.
+ */
+const ALIASES: Record<string, string> = {
+  bio: 'author',
+  chapter: 'newChapter',
+  contents: 'tableOfContents',
+}
+
+export const templateById = (id: string): Template | undefined =>
+  TEMPLATES.find((t) => t.id === (ALIASES[id] ?? id))

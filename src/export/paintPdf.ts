@@ -1,7 +1,8 @@
 import type { PDFDocument, PDFImage, PDFPage } from 'pdf-lib'
 import type { Rect } from '../render/types'
 import type { DrawOp } from '../render/record'
-import { setCharacterSpacing } from 'pdf-lib'
+import type { LeafLink } from '../render/leaf'
+import { PDFName, PDFString, setCharacterSpacing } from 'pdf-lib'
 import { parseFont, type FontBook } from './pdfFonts'
 import { blendOf, parseColor, PdfSpace, ringsToPath } from './pdfGfx'
 
@@ -210,6 +211,39 @@ function drawTextOp(cx: PaintContext, op: Extract<DrawOp, { op: 'text' }>): void
 // ---------------------------------------------------------------------------
 
 /**
+ * Turn linked runs into real PDF link annotations.
+ *
+ * pdf-lib has no helper for this: a `/Link` annotation is a dictionary
+ * registered in the file and referenced from the page's `/Annots` array, and the
+ * array has to be *merged* rather than set, since a page may already have some.
+ *
+ * `Border: [0, 0, 0]` because the underline is already drawn — the viewer's own
+ * rectangle around a link is the ugliest thing in PDF.
+ */
+function addLinks(cx: PaintContext, links: LeafLink[]): void {
+  if (!links.length) return
+  const refs = links.map((link) => {
+    const r = cx.space.rect(link.rect)
+    return cx.pdf.context.register(
+      cx.pdf.context.obj({
+        Type: 'Annot',
+        Subtype: 'Link',
+        Rect: [r.x, r.y, r.x + r.width, r.y + r.height],
+        Border: [0, 0, 0],
+        A: cx.pdf.context.obj({
+          Type: 'Action',
+          S: 'URI',
+          URI: PDFString.of(link.href),
+        }),
+      }),
+    )
+  })
+  const existing = cx.page.node.Annots()
+  if (existing) refs.forEach((ref) => existing.push(ref))
+  else cx.page.node.set(PDFName.of('Annots'), cx.pdf.context.obj(refs))
+}
+
+/**
  * Paint a page's ops. Images are embedded first so the async work is batched and
  * the drawing pass itself stays synchronous and in strict paint order.
  */
@@ -217,11 +251,15 @@ export async function paintPdfPage(
   cx: PaintContext,
   ops: DrawOp[],
   imageCache: Map<string, PDFImage>,
+  /** Linked runs, gathered by the painter — see `LeafEnv.collectLink`. */
+  links: LeafLink[] = [],
 ): Promise<void> {
   const images = new Map<number, { image: PDFImage; rect: Rect } | null>()
   for (const [i, op] of ops.entries()) {
     if (op.op === 'image') images.set(i, await embedImageOp(cx, op, imageCache))
   }
+
+  addLinks(cx, links)
 
   for (const [i, op] of ops.entries()) {
     const blendMode = blendOf(op.style.composite)

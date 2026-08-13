@@ -10,6 +10,7 @@ import {
   type LeafEnv,
   type PlacedBlock,
   type RenderAssets,
+  type TextRegion,
 } from './compose'
 
 /**
@@ -25,11 +26,36 @@ export interface LeafOptions {
   quality?: 'full' | 'thumb'
   /** Index into `deck.leaves`, used to derive the folio. */
   index?: number
+  /**
+   * Gather the editable text regions while painting.
+   *
+   * Off by default. Only the page you are looking at needs them; the page strip
+   * paints forty leaves and the export paints all of them again, and neither
+   * has a caret to place.
+   */
+  regions?: boolean
+  /**
+   * Gather the boxes of linked runs while painting.
+   *
+   * Only the PDF exporter wants these: on screen a link is an underline like
+   * any other, and there is nothing to click.
+   */
+  links?: boolean
 }
 
 export interface LeafResult {
   placed: PlacedBlock[]
   overflow: boolean
+  /** Empty unless `regions` was asked for. */
+  regions: TextRegion[]
+  /** Linked runs and their boxes. Empty unless `links` was asked for. */
+  links: LeafLink[]
+}
+
+/** One run of words that points somewhere, in the leaf's own pixel space. */
+export interface LeafLink {
+  href: string
+  rect: { x: number; y: number; w: number; h: number }
 }
 
 function buildEnv(
@@ -39,10 +65,12 @@ function buildEnv(
   widthPx: number,
   assets: RenderAssets,
   opts: LeafOptions,
+  collect?: (region: TextRegion) => void,
 ): LeafEnv {
   const index = opts.index ?? deck.leaves.indexOf(leaf)
   return {
     ctx,
+    collect,
     sheet: leaf.full ? spreadSheet(widthPx) : leafSheet(widthPx),
     leaf,
     deck,
@@ -88,12 +116,27 @@ function paintOverlays(env: LeafEnv): void {
   }
 }
 
-function paint(env: LeafEnv): LeafResult {
+function paint(env: LeafEnv, regions: TextRegion[], links: LeafLink[]): LeafResult {
   paintSurface(env)
   const { placed, overflow } = paintBlocks(env)
   paintFurniture(env)
   paintOverlays(env)
-  return { placed, overflow }
+  return { placed, overflow, regions, links }
+}
+
+/** Run `paint`, with the collectors wired up for whatever was asked for. */
+function run(env: LeafEnv, opts: LeafOptions): LeafResult {
+  const regions: TextRegion[] = []
+  const links: LeafLink[] = []
+  return paint(
+    {
+      ...env,
+      ...(opts.regions ? { collect: (r: TextRegion) => regions.push(r) } : {}),
+      ...(opts.links ? { collectLink: (l: LeafLink) => links.push(l) } : {}),
+    },
+    regions,
+    links,
+  )
 }
 
 /** Natural pixel width for a leaf at 1:1. Covers are twice as wide. */
@@ -108,7 +151,7 @@ export function renderLeaf(
   assets: RenderAssets,
   opts: LeafOptions = {},
 ): LeafResult {
-  return paint(buildEnv(ctx, leaf, deck, widthPx, assets, opts))
+  return run(buildEnv(ctx, leaf, deck, widthPx, assets, opts), opts)
 }
 
 /**
@@ -126,5 +169,5 @@ export function recordLeaf(
   opts: LeafOptions = {},
 ): { ops: DrawOp[] } & LeafResult {
   const { ctx, ops } = createRecorder(metrics)
-  return { ops, ...paint(buildEnv(ctx, leaf, deck, widthPx, assets, opts)) }
+  return { ops, ...run(buildEnv(ctx, leaf, deck, widthPx, assets, opts), opts) }
 }

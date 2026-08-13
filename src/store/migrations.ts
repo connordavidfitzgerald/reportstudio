@@ -1,4 +1,5 @@
-import type { Deck } from '../doc/types'
+import type { Deck, Leaf } from '../doc/types'
+import type { LocalizedText } from '../doc/localized'
 
 /**
  * Stored-session schema versions.
@@ -22,19 +23,37 @@ import type { Deck } from '../doc/types'
  * deliberately replaced.
  */
 /**
- * v4 exists only to drop v3 sessions.
+ * v4 and v5 existed only to drop the version before them.
  *
- * The seed document *is* the transcription, and it is still being corrected
- * against the Figma. A saved session takes precedence over the seed on reload,
- * so during this phase every fix to the reference pages was invisible behind
- * whatever had been persisted on the previous visit — which read as the fix
- * not working. Bumping the version each time the seed changes materially is
- * the honest way to keep what you see and what the code says in step.
+ * The seed document *is* the transcription, and while it was still being
+ * corrected against the Figma a saved session took precedence over the seed on
+ * reload — so every fix to the reference pages was invisible behind whatever
+ * had been persisted on the previous visit, which read as the fix not working.
+ * Bumping the version each time the seed changed was the honest way to keep
+ * what you see and what the code says in step.
  *
- * Once the transcription settles, this stops moving and real documents start
- * surviving upgrades.
+ * **That phase is over.** From v6 onwards a stored document is somebody's work,
+ * and discarding it to refresh the seed would be discarding the only copy. The
+ * seed is now just what a *new* document starts from.
  */
-export const CURRENT_VERSION = 6
+/**
+ * v7 → v8 replaced the free-text running head with a chapter and a section.
+ * See {@link STEPS}.
+ */
+export const CURRENT_VERSION = 8
+
+/**
+ * The oldest version {@link migrate} will carry forward.
+ *
+ * Everything below it is the poster-derived model or a mid-transcription
+ * session and is declined, per the note above. Everything from here up is
+ * carried: the versions since have only *added* optional fields, and
+ * `loadSession` spreads a stored deck over fresh defaults, so a document
+ * written before a field existed loads with that field present.
+ *
+ * v6 → v7 added the document's name.
+ */
+const FIRST_MIGRATABLE = 6
 
 /** The current stored payload. Deliberately unversioned in its *name* — the
  * version lives in the field, and renaming the type on every bump was churn. */
@@ -47,10 +66,50 @@ export interface Stored {
 /** Anything that might come out of storage. */
 export type StoredAny = { v?: number } & Record<string, unknown>
 
-/** Null when the payload predates the current version and can't be carried over. */
+/** A leaf as it was written before v8. */
+type LegacyLeaf = Leaf & { runningHead?: LocalizedText }
+
+/**
+ * One conversion, keyed by the version it produces.
+ *
+ * Applied in ascending order for every step *above* the payload's own version,
+ * so a v6 document walks 7 then 8. Steps that only added an optional field need
+ * no entry: `loadSession` spreads a stored deck over fresh defaults, so a
+ * document written before a field existed loads with that field present.
+ */
+const STEPS: Record<number, (deck: Deck) => Deck> = {
+  /**
+   * `runningHead` becomes `chapter`.
+   *
+   * Chapter rather than section, because the old field was always chapter-level
+   * in practice — the seed's heads are 'Executive summary', 'Methodology',
+   * 'Findings and implications' — and `runningHeadOf` prints it either way. A
+   * leaf that had no head must come out with *neither* field set: a headless
+   * page starts its content column 37pt higher, so inventing a chapter here
+   * would shift every such page in every saved document.
+   */
+  8: (deck) => ({
+    ...deck,
+    leaves: deck.leaves.map((leaf) => {
+      const { runningHead, ...rest } = leaf as LegacyLeaf
+      return runningHead === undefined ? (rest as Leaf) : { ...(rest as Leaf), chapter: runningHead }
+    }),
+  }),
+}
+
+/** Null when the payload predates {@link FIRST_MIGRATABLE} and can't be carried over. */
 export function migrate(raw: StoredAny): Stored | null {
-  if (raw?.v !== CURRENT_VERSION) return null
+  const v = raw?.v
+  if (typeof v !== 'number') return null
+  // A payload from a future build is declined rather than assumed compatible:
+  // this code cannot know what it would have to undo.
+  if (v < FIRST_MIGRATABLE || v > CURRENT_VERSION) return null
   const stored = raw as unknown as Stored
   if (!stored.deck || !Array.isArray(stored.deck.leaves)) return null
-  return stored
+
+  let deck = stored.deck
+  for (let step = v + 1; step <= CURRENT_VERSION; step += 1) {
+    deck = STEPS[step]?.(deck) ?? deck
+  }
+  return { ...stored, deck, v: CURRENT_VERSION }
 }

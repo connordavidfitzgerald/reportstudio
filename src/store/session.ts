@@ -1,43 +1,31 @@
 import type { Deck } from '../doc/types'
 import { createDeck } from '../doc/defaults'
-import { CURRENT_VERSION, migrate, type StoredAny, type Stored } from './migrations'
+import { migrate, type StoredAny } from './migrations'
 
 /**
- * The storage key, deliberately NOT versioned alongside the schema. Bumping it
- * would orphan every existing session rather than let `migrations.ts` decide
- * what to do with it — the schema version lives inside the payload.
+ * The old single-slot session, kept only long enough to rescue it.
+ *
+ * Documents now live in IndexedDB (`store/library.ts`). This module no longer
+ * writes anything: it exists so that a client who had work in the previous
+ * build doesn't lose it on the upgrade. `adoptLegacySession` runs once on boot,
+ * moves whatever it finds into the library, and clears the key.
+ *
+ * Delete this file once no browser can plausibly still be holding the key.
  */
+
 const KEY = 'lehub.report.session.v1'
 
-/** Refuse to write a payload near the ~5MB localStorage quota. */
-const MAX_BYTES = 2_000_000
-
-export function saveSession(deck: Deck, leafIndex = 0): void {
+/** The stored deck, or null if there is none (or it is too old to carry). */
+export function loadLegacySession(): Deck | null {
+  let raw: string | null
   try {
-    // A document is plain JSON all the way down — decoded images live in
-    // `doc/imageCache.ts`, so there is nothing to strip out first.
-    const json = JSON.stringify({ v: CURRENT_VERSION, deck, leafIndex } satisfies Stored)
-    if (json.length > MAX_BYTES) {
-      console.warn(
-        `[session] not saving: ${(json.length / 1e6).toFixed(1)}MB exceeds the ${MAX_BYTES / 1e6}MB limit.`,
-      )
-      return
-    }
-    localStorage.setItem(KEY, json)
-  } catch (err) {
-    console.warn('[session] save failed', err)
+    raw = localStorage.getItem(KEY)
+  } catch {
+    return null
   }
-}
-
-/**
- * The stored document, or null if there is none (or it predates v3 — see
- * `migrations.ts` for why those are dropped rather than converted).
- */
-export function loadSession(): Deck | null {
-  let stored: Stored | null
+  if (!raw) return null
+  let stored
   try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return null
     stored = migrate(JSON.parse(raw) as StoredAny)
   } catch {
     return null
@@ -48,10 +36,10 @@ export function loadSession(): Deck | null {
   return { ...createDeck(stored.deck.leaves), ...stored.deck }
 }
 
-export function clearSession(): void {
+export function clearLegacySession(): void {
   try {
     localStorage.removeItem(KEY)
   } catch {
-    /* nothing to do — a failed clear just means the old session stays */
+    /* nothing to do — a failed clear just means the old key lingers */
   }
 }

@@ -1,5 +1,10 @@
 import { blockId, type Block, type BlockKind } from './blocks'
-import { leafId, type Deck, type Leaf } from './types'
+import { createLeaf, type Deck, type Leaf } from './types'
+
+// `createLeaf` and `pairLeaves` live in `./types`, beside `deckSpreads`: they
+// are the same pagination rule stated as constructors rather than as a reader.
+// Re-exported here because this is where the document's seeds live.
+export { createLeaf, pairLeaves } from './types'
 
 /**
  * Seeds for every component and leaf.
@@ -129,16 +134,8 @@ export function createBlock(kind: BlockKind): Block {
   }
 }
 
-/** A blank body leaf: paper, dense body copy, furniture on. */
-export const createLeaf = (over: Partial<Leaf> = {}): Leaf => ({
-  id: leafId(),
-  surface: 'paper',
-  bodySize: 'xs',
-  blocks: [],
-  ...over,
-})
-
-export const createDeck = (leaves: Leaf[] = [createLeaf()]): Deck => ({
+export const createDeck = (leaves: Leaf[] = [createLeaf(), createLeaf()]): Deck => ({
+  name: 'Untitled report',
   lang: 'en',
   leaves,
   startFolio: 1,
@@ -157,32 +154,101 @@ export const createDeck = (leaves: Leaf[] = [createLeaf()]): Deck => ({
 export { toolsForChange as seedDeck } from './toolsForChange'
 
 /**
- * Human labels for the insert menu, in the order they're offered.
+ * What each component is called and what it is for, in the order offered.
  *
  * Ordered by how often the 11 spreads reach for them, not alphabetically: the
- * things you add to most pages should not be at the bottom of a list.
+ * things you add to most pages should not be at the bottom of a list. The
+ * groups are for scanning — twenty flat choices is a wall, and someone who has
+ * never laid out a page cannot tell "Statement" from "Pull quote" from the name
+ * alone, which is what `hint` is for.
  */
-export const BLOCK_LABELS: Record<BlockKind, string> = {
-  para: 'Paragraph',
-  heading: 'Chapter title',
-  deck: 'Chapter definition',
-  sectionHeading: 'Section heading',
-  subhead: 'Ruled sub-head',
-  defList: 'Definition list',
-  figure: 'Image',
-  band: 'Colour band',
-  chart: 'Bar chart',
-  statement: 'Statement',
-  quote: 'Pull quote',
-  quoteOverlay: 'Quote over image',
-  links: 'Links',
-  bulletList: 'Bullet list',
-  tocEntry: 'Contents entry',
-  credits: 'Credits',
-  rule: 'Rule',
-  spacer: 'Spacer',
-  text: 'Caption / small text',
-  cover: 'Cover (full spread)',
+export type BlockGroup = 'Text' | 'Lists & data' | 'Pictures' | 'Layout'
+
+export interface BlockInfo {
+  label: string
+  group: BlockGroup
+  hint: string
 }
 
-export const BLOCK_ORDER = Object.keys(BLOCK_LABELS) as BlockKind[]
+export const BLOCK_INFO: Record<BlockKind, BlockInfo> = {
+  para: { label: 'Paragraph', group: 'Text', hint: 'Running body copy.' },
+  heading: { label: 'Chapter title', group: 'Text', hint: 'The big opener at the top of a chapter.' },
+  deck: { label: 'Chapter definition', group: 'Text', hint: 'The one-line definition under a chapter title.' },
+  sectionHeading: { label: 'Section heading', group: 'Text', hint: '“Resources”, “Related articles”.' },
+  subhead: { label: 'Ruled sub-head', group: 'Text', hint: 'A small caps label between two hairlines.' },
+  quote: { label: 'Pull quote', group: 'Text', hint: 'A passage set larger and inset from the measure.' },
+  statement: { label: 'Statement', group: 'Text', hint: 'A shouted sentence with phrases on colour.' },
+  text: { label: 'Caption / small text', group: 'Text', hint: 'A photo credit or a note.' },
+
+  defList: { label: 'Definition list', group: 'Lists & data', hint: 'Terms on the left, definitions on the right.' },
+  bulletList: { label: 'Bullet list', group: 'Lists & data', hint: 'Short items, in one column or two.' },
+  links: { label: 'Links', group: 'Lists & data', hint: 'Underlined resources, each with an optional note.' },
+  credits: { label: 'Credits', group: 'Lists & data', hint: 'Role and name, stacked — the colophon.' },
+  chart: { label: 'Bar chart', group: 'Lists & data', hint: 'Horizontal bars whose width is their value.' },
+  tocEntry: { label: 'Contents entry', group: 'Lists & data', hint: 'A chapter row with its page number.' },
+
+  figure: { label: 'Image', group: 'Pictures', hint: 'A photograph in a frame, with an optional caption.' },
+  quoteOverlay: { label: 'Quote over image', group: 'Pictures', hint: 'Condensed caps centred on a picture.' },
+  band: { label: 'Colour band', group: 'Pictures', hint: 'A colour field with text, running to the page edge.' },
+  cover: { label: 'Cover', group: 'Pictures', hint: 'The front of the report. One per document.' },
+
+  rule: { label: 'Rule', group: 'Layout', hint: 'A hairline across the measure.' },
+  spacer: { label: 'Space', group: 'Layout', hint: 'A measured gap, or one that absorbs what is left.' },
+}
+
+/** Just the names, for the places that only need one. */
+export const BLOCK_LABELS: Record<BlockKind, string> = Object.fromEntries(
+  Object.entries(BLOCK_INFO).map(([kind, info]) => [kind, info.label]),
+) as Record<BlockKind, string>
+
+export const BLOCK_ORDER = Object.keys(BLOCK_INFO) as BlockKind[]
+
+/** The insert menu, grouped, keeping each group's frequency ordering. */
+export const BLOCK_GROUPS: { group: BlockGroup; kinds: BlockKind[] }[] = (
+  ['Text', 'Lists & data', 'Pictures', 'Layout'] as BlockGroup[]
+).map((group) => ({
+  group,
+  kinds: BLOCK_ORDER.filter((kind) => BLOCK_INFO[kind].group === group),
+}))
+
+/**
+ * What the panel offers, grouped and labelled as the Figma has it.
+ *
+ * Eleven of the twenty kinds. **The other nine are not gone** — `cover`,
+ * `tocEntry`, `chart`, `band`, `quoteOverlay`, `credits`, `links`,
+ * `sectionHeading` and `deck` still paint, still round-trip, and are still what
+ * the Cover, Table of Contents and chapter-opener templates build. They are
+ * simply not things to start from a blank page with, and a wall of twenty
+ * choices was the reason the panel needed cutting down in the first place.
+ *
+ * So `BLOCK_ORDER` and `BLOCK_LABELS` stay exhaustive — every kind still needs a
+ * name for the canvas's own labels — and only this list is short.
+ */
+export const OFFERED_GROUPS: { group: string; kinds: BlockKind[] }[] = [
+  { group: 'Text (regular)', kinds: ['heading', 'para', 'subhead', 'text'] },
+  { group: 'Text (display)', kinds: ['statement', 'quote'] },
+  { group: 'Lists and Data', kinds: ['defList', 'bulletList'] },
+  { group: 'Media', kinds: ['figure'] },
+  { group: 'Layout', kinds: ['rule', 'spacer'] },
+]
+
+/**
+ * The short name a component goes by in the palette.
+ *
+ * Deliberately not `BLOCK_INFO.label`: that one has to be unambiguous wherever
+ * it appears — "Caption / small text", "Chapter title" — while the palette has a
+ * group heading above it doing half the work.
+ */
+export const OFFERED_LABELS: Partial<Record<BlockKind, string>> = {
+  heading: 'Heading',
+  para: 'Paragraph',
+  subhead: 'Sub-heading',
+  text: 'Caption',
+  statement: 'Statement',
+  quote: 'Quote',
+  defList: 'Definitions',
+  bulletList: 'Bullet list',
+  figure: 'Image',
+  rule: 'Rule',
+  spacer: 'Spacer',
+}

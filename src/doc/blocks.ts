@@ -1,6 +1,7 @@
 import type { ImageRef } from './imageStore'
 import type { BodySizeId, InkAlphaId, SurfaceId } from '../config/brand'
 import type { LocalizedText } from './localized'
+import type { MarkMap } from './marks'
 
 /**
  * The component vocabulary.
@@ -37,6 +38,27 @@ interface BlockBase {
   breakBefore?: boolean
   /** Don't strand this block at the foot of a leaf. Default true for headings. */
   keepWithNext?: boolean
+  /**
+   * Set this block in the other brand voice.
+   *
+   * Absent — which is the normal case — means the voice its kind implies: a
+   * chapter title is display, body copy is text (see `config/brand.ts`, where
+   * the split is by *function*, not by size). This is the override for the
+   * occasion when a paragraph wants to shout, and it is on the base rather than
+   * on the text kinds because the toolbar offers it wherever there are words.
+   *
+   * Note the display voice is always set in caps, so switching to it changes
+   * the case as well as the face — see `editableStyle` in `render/compose.ts`.
+   */
+  voice?: 'display' | 'text'
+  /**
+   * Bold, italic, underline and links, as ranges over this block's fields.
+   *
+   * Keyed by field path, so `['rows', 2, 'term']` and `['text']` each carry
+   * their own. Absent means plain text, which is what nearly every block is —
+   * see `doc/marks.ts` for why they live beside the text rather than in it.
+   */
+  marks?: MarkMap
 }
 
 // ---------------------------------------------------------------------------

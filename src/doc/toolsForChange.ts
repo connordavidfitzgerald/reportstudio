@@ -34,8 +34,8 @@ import type { Deck, Leaf } from './types'
 let n = 0
 const b = (block: BlockSeed): Block => ({ ...block, id: `tfc_${(n += 1)}` }) as Block
 
-const EXEC = 'Executive summary'
-const FINDINGS = 'Findings and implications'
+const EXEC = 'Executive Summary'
+const FINDINGS = 'Findings and Implications'
 
 const leaves: Leaf[] = [
   // -- 1. Cover, across the full spread ------------------------------------
@@ -92,7 +92,8 @@ const leaves: Leaf[] = [
     id: 'tfc-author',
     surface: 'paper',
     bodySize: 'xs',
-    runningHead: 'About the author',
+    chapter: 'Introduction',
+    section: 'About the author',
     templateId: 'bio',
     blocks: [
       b({
@@ -114,7 +115,7 @@ const leaves: Leaf[] = [
     id: 'tfc-contents',
     surface: 'paper',
     bodySize: 'xs',
-    runningHead: 'Table of contents',
+    chapter: 'Table of contents',
     templateId: 'contents',
     blocks: [
       b({ kind: 'tocEntry', label: 'Executive summary', folio: 6 }),
@@ -182,7 +183,7 @@ const leaves: Leaf[] = [
     id: 'tfc-exec-lede',
     surface: 'paper',
     bodySize: 'l',
-    runningHead: EXEC,
+    chapter: EXEC,
     blocks: [
       b({ kind: 'spacer', height: 190 }),
       b({
@@ -221,7 +222,7 @@ const leaves: Leaf[] = [
     id: 'tfc-defs-1',
     surface: 'paper',
     bodySize: 'xs',
-    runningHead: EXEC,
+    chapter: EXEC,
     templateId: 'defList',
     blocks: [
       b({
@@ -259,7 +260,7 @@ const leaves: Leaf[] = [
     id: 'tfc-defs-2',
     surface: 'paper',
     bodySize: 'xs',
-    runningHead: EXEC,
+    chapter: EXEC,
     templateId: 'defList',
     blocks: [
       b({
@@ -295,7 +296,7 @@ const leaves: Leaf[] = [
     id: 'tfc-defs-3',
     surface: 'paper',
     bodySize: 'xs',
-    runningHead: EXEC,
+    chapter: EXEC,
     templateId: 'defList',
     blocks: [
       b({
@@ -321,7 +322,7 @@ const leaves: Leaf[] = [
     id: 'tfc-exec-close',
     surface: 'paper',
     bodySize: 'l',
-    runningHead: EXEC,
+    chapter: EXEC,
     blocks: [
       b({
         kind: 'para',
@@ -338,7 +339,7 @@ const leaves: Leaf[] = [
     id: 'tfc-intro',
     surface: 'paper',
     bodySize: 'l',
-    runningHead: 'Introduction',
+    chapter: 'Introduction',
     templateId: 'body',
     blocks: [
       b({
@@ -372,7 +373,7 @@ const leaves: Leaf[] = [
     id: 'tfc-method',
     surface: 'paper',
     bodySize: 'xs',
-    runningHead: 'Methodology',
+    chapter: 'Methodology',
     templateId: 'methodology',
     blocks: [
       b({
@@ -432,7 +433,7 @@ const leaves: Leaf[] = [
     id: 'tfc-chart',
     surface: 'paper',
     bodySize: 'xs',
-    runningHead: 'Methodology',
+    chapter: 'Methodology',
     templateId: 'chart',
     blocks: [
       b({
@@ -454,7 +455,7 @@ const leaves: Leaf[] = [
     id: 'tfc-findings-open',
     surface: 'ochre',
     bodySize: 'l',
-    runningHead: FINDINGS,
+    chapter: FINDINGS,
     blocks: [
       b({
         kind: 'para',
@@ -499,7 +500,7 @@ const leaves: Leaf[] = [
     id: 'tfc-categories-1',
     surface: 'ochre',
     bodySize: 's',
-    runningHead: FINDINGS,
+    chapter: FINDINGS,
     blocks: [
       b({ kind: 'heading', text: 'Doing' }),
       b({
@@ -524,7 +525,7 @@ const leaves: Leaf[] = [
     id: 'tfc-categories-2',
     surface: 'ochre',
     bodySize: 's',
-    runningHead: FINDINGS,
+    chapter: FINDINGS,
     blocks: [
       b({ kind: 'heading', text: 'Canadian Context' }),
       b({
@@ -540,7 +541,8 @@ const leaves: Leaf[] = [
     id: 'tfc-chapter',
     surface: 'ochre',
     bodySize: 's',
-    runningHead: 'Doing (campaigns/actions)',
+    chapter: FINDINGS,
+    section: 'Doing (campaigns/actions)',
     templateId: 'chapter',
     blocks: [
       b({ kind: 'heading', text: 'Campaign Development' }),
@@ -562,7 +564,8 @@ const leaves: Leaf[] = [
     id: 'tfc-resources',
     surface: 'ochre',
     bodySize: 'm',
-    runningHead: 'Doing (campaigns/actions)',
+    chapter: FINDINGS,
+    section: 'Doing (campaigns/actions)',
     templateId: 'resources',
     blocks: [
       b({
@@ -608,6 +611,7 @@ const leaves: Leaf[] = [
 
 /** The seed document. */
 export const toolsForChange = (): Deck => ({
+  name: 'Tools for Change',
   lang: 'en',
   leaves: leaves.map((l) => ({ ...l, blocks: [...l.blocks] })),
   startFolio: 1,

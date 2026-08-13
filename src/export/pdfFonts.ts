@@ -1,9 +1,13 @@
-import fontkit from '@pdf-lib/fontkit'
 import type { PDFDocument, PDFFont } from 'pdf-lib'
-import { DISPLAY_FONT, TEXT_FONT } from '../config/fonts'
+import { FONTS, TEXT_FONT } from '../config/fonts'
+import { embedOpenTypeFont, finalizeOpenTypeFonts } from './embedOtf'
 
 import displayUrl from '../fonts/ReviewCondensed-Heavy.otf?url'
+import displayItalicUrl from '../fonts/ReviewCondensed-HeavyItalic.otf?url'
 import textUrl from '../fonts/NHaasGroteskDSPro-65Md.otf?url'
+import textBoldUrl from '../fonts/NHaasGroteskDSPro-75Bd.otf?url'
+import textItalicUrl from '../fonts/NHaasGroteskDSPro-66MdIt.otf?url'
+import textBoldItalicUrl from '../fonts/NHaasGroteskDSPro-76BdIt.otf?url'
 
 /**
  * Embedding the brand fonts in the PDF.
@@ -17,8 +21,12 @@ import textUrl from '../fonts/NHaasGroteskDSPro-65Md.otf?url'
  * line break in the PDF somewhere the preview didn't.
  */
 const FONT_FILES: Record<string, string> = {
-  [DISPLAY_FONT.family]: displayUrl,
-  [TEXT_FONT.family]: textUrl,
+  [FONTS.display.regular.family]: displayUrl,
+  [FONTS.display.italic.family]: displayItalicUrl,
+  [FONTS.text.regular.family]: textUrl,
+  [FONTS.text.bold.family]: textBoldUrl,
+  [FONTS.text.italic.family]: textItalicUrl,
+  [FONTS.text.boldItalic.family]: textBoldItalicUrl,
 }
 
 /** Parsed form of a canvas `font` string, as produced by `fontString()`. */
@@ -44,26 +52,52 @@ export function parseFont(font: string): ParsedFont | null {
 
 export type FontBook = (family: string) => PDFFont
 
+export interface BrandFonts {
+  /** The face for a family name, falling back to the text face. */
+  fonts: FontBook
+  /**
+   * Embed any of these families that isn't in the file yet.
+   *
+   * Called per page with the families that page's recorded ops actually name,
+   * because these fonts are embedded whole — `embedOtf.ts` explains why they
+   * cannot be subsetted — and a monolingual report with no bold in it should
+   * not carry six unsubsetted OpenType programs it never draws with.
+   */
+  ensure(families: Iterable<string>): Promise<void>
+  /**
+   * Finish the embedding. Must run after the last page is painted and before
+   * `save()` — see {@link finalizeOpenTypeFonts} for why the order is forced.
+   */
+  finalize: () => Promise<void>
+}
+
 /**
  * Embed every brand font once and return a lookup.
  *
- * Subsetting is on. It works — the spike's apparent failure was `showText` with
- * a raw string, which never records which glyphs were used; pdf-lib's own
- * `drawText` calls `encodeText` and therefore registers them. See
- * `scripts/spike-pdf.mjs`.
+ * The embedding itself — and the reason it does not subset — lives in
+ * `embedOtf.ts`, which stays free of Vite's `?url` imports so the check script
+ * can run it under Node.
  */
-export async function embedBrandFonts(pdf: PDFDocument): Promise<FontBook> {
-  pdf.registerFontkit(fontkit)
+export async function embedBrandFonts(pdf: PDFDocument): Promise<BrandFonts> {
+  const byFamily = new Map<string, PDFFont>()
 
-  const entries = await Promise.all(
-    Object.entries(FONT_FILES).map(async ([family, url]) => {
-      const bytes = await fetch(url).then((r) => r.arrayBuffer())
-      return [family, await pdf.embedFont(bytes, { subset: true })] as const
-    }),
-  )
+  const embed = async (family: string): Promise<void> => {
+    const url = FONT_FILES[family]
+    if (!url || byFamily.has(family)) return
+    const bytes = await fetch(url).then((r) => r.arrayBuffer())
+    byFamily.set(family, await embedOpenTypeFont(pdf, bytes))
+  }
 
-  const byFamily = new Map(entries)
-  const fallback = byFamily.get(TEXT_FONT.family)!
+  // The text roman is always embedded: it is the fallback for a family this
+  // module doesn't recognise, and `fonts()` has to be able to answer
+  // synchronously while a page is being painted.
+  await embed(TEXT_FONT.family)
 
-  return (family: string) => byFamily.get(family) ?? fallback
+  return {
+    fonts: (family: string) => byFamily.get(family) ?? byFamily.get(TEXT_FONT.family)!,
+    ensure: async (families) => {
+      for (const family of families) await embed(family)
+    },
+    finalize: () => finalizeOpenTypeFonts(pdf, byFamily.values()),
+  }
 }

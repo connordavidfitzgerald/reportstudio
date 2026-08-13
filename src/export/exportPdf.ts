@@ -5,7 +5,7 @@ import { collectImageRefs, imagesReady } from '../doc/imageCache'
 import type { Deck, Leaf } from '../doc/types'
 import type { RenderAssets } from '../render/compose'
 import { leafWidth, recordLeaf, renderLeaf } from '../render/leaf'
-import { embedBrandFonts, type FontBook } from './pdfFonts'
+import { embedBrandFonts, parseFont, type FontBook } from './pdfFonts'
 import { PdfSpace } from './pdfGfx'
 import { paintPdfPage } from './paintPdf'
 
@@ -68,8 +68,10 @@ export async function exportDeckPdf(
   const pdf = await PDFDocument.create()
 
   let fonts: FontBook
+  let ensureFonts: (families: Iterable<string>) => Promise<void>
+  let finalizeFonts: () => Promise<void>
   try {
-    fonts = await embedBrandFonts(pdf)
+    ;({ fonts, ensure: ensureFonts, finalize: finalizeFonts } = await embedBrandFonts(pdf))
   } catch (err) {
     console.warn('[export] falling back to the raster exporter: font embedding failed', err)
     return exportRasterPdf(deck, assets, opts)
@@ -86,8 +88,17 @@ export async function exportDeckPdf(
     // Record at the page's point size, so recorded ops are already in points
     // and the transform is 1:1. `scale` only reaches the embedded bitmaps.
     const width = leafWidth(leaf)
-    const { ops } = recordLeaf(metrics, leaf, deck, width, assets, { index: i })
+    const { ops, links } = recordLeaf(metrics, leaf, deck, width, assets, {
+      index: i,
+      links: true,
+    })
     const [ptW, ptH] = pageSize(leaf)
+
+    // Embed the cuts this page actually draws with, before painting it. The
+    // family is the join between the canvas and the PDF — see `pdfFonts.ts`.
+    await ensureFonts(
+      ops.flatMap((op) => (op.op === 'text' ? [parseFont(op.style.font)?.family ?? ''] : [])),
+    )
 
     await paintPdfPage(
       {
@@ -101,11 +112,15 @@ export async function exportDeckPdf(
       },
       ops,
       imageCache,
+      links,
     )
 
     onProgress?.(i + 1, deck.leaves.length)
     await new Promise((r) => setTimeout(r, 0))
   }
+
+  // After the last `drawText`, before `save()`. Both halves matter.
+  await finalizeFonts()
 
   const bytes = await pdf.save()
   return new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' })
@@ -183,15 +198,4 @@ export async function exportLeafPng(
   return new Promise((resolve, reject) =>
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png'),
   )
-}
-
-export function download(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
 }

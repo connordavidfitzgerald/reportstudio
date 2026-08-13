@@ -33,10 +33,30 @@ export interface Segment {
   /** Sits on the spread's swash colour. */
   swash?: boolean
   underline?: boolean
+  /** Set in the bold / italic cut of the run's voice. */
+  bold?: boolean
+  italic?: boolean
+  /**
+   * The link this run points at.
+   *
+   * Nothing in the canvas painter uses it — a link is drawn as an underline
+   * like any other. It is carried so the PDF exporter can turn the run's box
+   * into a real annotation, which is the only place a URL can be *followed*.
+   */
+  href?: string
   /** Point size override; defaults to the run's style. */
   size?: number
   /** Ink alpha override. */
   alpha?: TextStyle['alpha']
+  /**
+   * Which document field this run came from.
+   *
+   * Purely a label — it changes nothing about how the run is set. It exists so
+   * the editor can find where a field ended up after wrapping: a resources row
+   * puts a link and its note on one flowed line, and putting a caret in the
+   * right half of it means knowing which parts belong to which.
+   */
+  id?: string
 }
 
 interface Part extends Segment {
@@ -48,6 +68,14 @@ interface Part extends Segment {
 export interface InlineLine {
   parts: Part[]
   width: number
+  /**
+   * This line opens a paragraph, and so takes the first-line indent.
+   *
+   * Carried rather than inferred from the index for the same reason
+   * `WrappedLine` carries it: the indent belongs to the first line of *each*
+   * paragraph, not to the first line of the block.
+   */
+  opensPara: boolean
 }
 
 /**
@@ -62,43 +90,71 @@ export function layoutInline(
   style: TextStyle,
   segments: Segment[],
   maxWidth: number,
+  opts: {
+    /**
+     * First-line indent, in pixels, applied to the opening line of each
+     * paragraph. Only honoured for left-aligned runs: with the indent baked
+     * into the line's width, a centred line would be pushed off-centre by it.
+     */
+    indent?: number
+  } = {},
 ): InlineLine[] {
+  const indent = style.align === 'left' ? (opts.indent ?? 0) : 0
+
   // Tokenise into words tagged with their segment, keeping the spaces that
   // separate them so a segment boundary mid-phrase doesn't glue words together.
+  // Newlines are split out as tokens of their own: they arrive inside runs of
+  // whitespace like `'\n\n'` or `' \n'`, and testing a token for equality with
+  // '\n' silently misses both.
   const tokens: { word: string; seg: Segment }[] = []
   for (const seg of segments) {
-    const words = cased(seg.text, style).split(/(\s+)/).filter((s) => s !== '')
+    const words = cased(seg.text, style)
+      .replace(/\r\n?/g, '\n')
+      .split(/(\n|[^\S\n]+)/)
+      .filter((s) => s !== '')
     for (const word of words) tokens.push({ word, seg })
   }
 
   const widthOf = (word: string, seg: Segment): number => {
-    applyFont(ctx, sheet, { ...style, size: seg.size ?? style.size })
+    applyFont(ctx, sheet, {
+      ...style,
+      size: seg.size ?? style.size,
+      bold: seg.bold ?? style.bold,
+      italic: seg.italic ?? style.italic,
+    })
     return ctx.measureText(word).width
   }
 
   const lines: InlineLine[] = []
   let parts: Part[] = []
   let x = 0
+  /** The next line to be flushed opens a paragraph. True for the first. */
+  let opensPara = true
 
-  const flush = () => {
+  const flush = (endsPara = false) => {
     // Drop trailing whitespace so alignment and swash widths ignore it.
     while (parts.length && parts[parts.length - 1].text.trim() === '') {
       x -= parts[parts.length - 1].w
       parts.pop()
     }
-    if (parts.length) lines.push({ parts, width: x })
+    if (parts.length) lines.push({ parts, width: x, opensPara })
+    else if (endsPara) lines.push({ parts: [], width: 0, opensPara })
     parts = []
     x = 0
+    // A wrapped line continues its paragraph; one ended by a newline starts a
+    // new one.
+    opensPara = endsPara
   }
 
   for (const { word, seg } of tokens) {
     if (word === '\n') {
-      flush()
+      flush(true)
       continue
     }
     const w = widthOf(word, seg)
     const blank = word.trim() === ''
-    if (!blank && x + w > maxWidth && parts.length) flush()
+    const limit = maxWidth - (parts.length === 0 && opensPara ? indent : opensPara ? indent : 0)
+    if (!blank && x + w > limit && parts.length) flush()
     // A space that would open a line is dropped rather than indenting it.
     if (blank && parts.length === 0) continue
     const last = parts[parts.length - 1]
@@ -106,8 +162,11 @@ export function layoutInline(
       last &&
       last.swash === seg.swash &&
       last.underline === seg.underline &&
+      last.bold === seg.bold &&
+      last.italic === seg.italic &&
       last.size === seg.size &&
-      last.alpha === seg.alpha
+      last.alpha === seg.alpha &&
+      last.href === seg.href
     ) {
       last.text += word
       last.w += w
@@ -117,6 +176,17 @@ export function layoutInline(
     x += w
   }
   flush()
+
+  // The indent is folded into the parts' offsets rather than handled at draw
+  // time, so `drawInline`, `inlineSwashRects` and `segmentRect` all keep working
+  // off `originX + p.x` and none of them needs to know indents exist.
+  if (indent) {
+    for (const line of lines) {
+      if (!line.opensPara) continue
+      for (const part of line.parts) part.x += indent
+      line.width += indent
+    }
+  }
   return lines
 }
 
@@ -194,6 +264,75 @@ export function inlineBaseline(
   return { base: baselineOffset(ctx, sheet, style), metrics: swashMetrics(ctx, sheet, style) }
 }
 
+/**
+ * Where a tagged segment ended up, as one box covering every part of it.
+ *
+ * Mirrors {@link drawInline}'s geometry exactly — same advance, same
+ * `alignX` — because it is answering "where did you draw this?" and any
+ * independent guess would drift the moment either changed.
+ *
+ * A run that wrapped across lines returns the box enclosing all of it, which is
+ * the right anchor for a caret even though it is wider than the ink.
+ */
+export function segmentRect(
+  sheet: Sheet,
+  style: TextStyle,
+  lines: InlineLine[],
+  box: Rect,
+  id: string,
+): Rect | null {
+  const advance = lineAdvance(sheet, style)
+  let x0 = Infinity
+  let x1 = -Infinity
+  let y0 = Infinity
+  let y1 = -Infinity
+
+  lines.forEach((line, i) => {
+    const originX = alignX(box.x, box.w, line.width, style.align)
+    for (const p of line.parts) {
+      if (p.id !== id || p.text.trim() === '') continue
+      x0 = Math.min(x0, originX + p.x)
+      x1 = Math.max(x1, originX + p.x + p.w)
+      y0 = Math.min(y0, box.y + i * advance)
+      y1 = Math.max(y1, box.y + (i + 1) * advance)
+    }
+  })
+
+  return x1 > x0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null
+}
+
+/**
+ * Where each linked run ended up, so the PDF can turn it into an annotation.
+ *
+ * Mirrors {@link drawInline}'s geometry exactly — same advance, same `alignX` —
+ * for the same reason {@link segmentRect} does: it is answering "where did you
+ * draw this?", and any independent guess would drift the moment either changed.
+ *
+ * One rect per part rather than one per link: a link that wraps is two boxes on
+ * the page, and a single box enclosing both would make the whitespace between
+ * the lines clickable.
+ */
+export function inlineLinkRects(
+  sheet: Sheet,
+  style: TextStyle,
+  lines: InlineLine[],
+  box: Rect,
+): { href: string; rect: Rect }[] {
+  const advance = lineAdvance(sheet, style)
+  const out: { href: string; rect: Rect }[] = []
+  lines.forEach((line, i) => {
+    const originX = alignX(box.x, box.w, line.width, style.align)
+    for (const p of line.parts) {
+      if (!p.href || p.text.trim() === '') continue
+      out.push({
+        href: p.href,
+        rect: { x: originX + p.x, y: box.y + i * advance, w: p.w, h: advance },
+      })
+    }
+  })
+  return out
+}
+
 /** Paint inline lines at the baseline from {@link inlineBaseline}. */
 export function drawInline(
   ctx: CanvasRenderingContext2D,
@@ -212,7 +351,15 @@ export function drawInline(
     const y = box.y + i * advance + base
     for (const p of line.parts) {
       if (p.text.trim() === '') continue
-      applyFont(ctx, sheet, { ...style, size: p.size ?? style.size })
+      // The cut has to be re-applied per part, and with the same expression the
+      // measuring pass used: a part measured in bold and drawn in the roman
+      // would be laid out at one width and painted at another.
+      applyFont(ctx, sheet, {
+        ...style,
+        size: p.size ?? style.size,
+        bold: p.bold ?? style.bold,
+        italic: p.italic ?? style.italic,
+      })
       ctx.fillStyle = ink(p.alpha ?? style.alpha)
       ctx.fillText(p.text, originX + p.x, y)
       if (p.underline) {

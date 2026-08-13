@@ -70,14 +70,48 @@ export function getImage(ref: ImageRef | null): HTMLImageElement | null {
   return null
 }
 
-/** Every image reference on a leaf: its plate, and any figure blocks. */
+/**
+ * Every image reference on a leaf: its plate, and any block that carries one.
+ *
+ * Both block kinds have to be listed. An earlier version checked only `figure`,
+ * which meant an uploaded *cover* photograph was absent from `collectBlobIds` —
+ * so the boot-time `pruneImageBlobs` sweep deleted it as unreferenced, and the
+ * export's `imagesReady` gate didn't wait for it.
+ */
 function leafRefs(leaf: Leaf): ImageRef[] {
   const refs: ImageRef[] = []
   if (leaf.plate?.imageRef) refs.push(leaf.plate.imageRef)
   for (const block of leaf.blocks) {
-    if (block.kind === 'figure' && block.imageRef) refs.push(block.imageRef)
+    if ((block.kind === 'figure' || block.kind === 'cover') && block.imageRef) {
+      refs.push(block.imageRef)
+    }
   }
   return refs
+}
+
+/**
+ * Rewrite every image reference in a deck.
+ *
+ * Used by the transfer format, which has to swap a document's blob ids for the
+ * ones it just wrote on this machine. Returning `null` from `fn` clears the
+ * reference, which is what an image that failed to travel should become — a
+ * placeholder box, not a ref pointing at a blob that isn't there.
+ */
+export function mapDeckImageRefs(deck: Deck, fn: (ref: ImageRef) => ImageRef | null): Deck {
+  return {
+    ...deck,
+    leaves: deck.leaves.map((leaf) => ({
+      ...leaf,
+      plate: leaf.plate?.imageRef
+        ? { ...leaf.plate, imageRef: fn(leaf.plate.imageRef) }
+        : leaf.plate,
+      blocks: leaf.blocks.map((block) =>
+        (block.kind === 'figure' || block.kind === 'cover') && block.imageRef
+          ? { ...block, imageRef: fn(block.imageRef) }
+          : block,
+      ),
+    })),
+  }
 }
 
 /** Every image reference in a deck, de-duplicated. */

@@ -3,6 +3,7 @@ import { useImage } from './useImage'
 import { getImage } from '../doc/imageCache'
 import { OVERLAYS } from '../config/brand'
 import type { RenderAssets } from '../render/compose'
+import wordmarkUrl from '../assets/figma/lehub-logo.svg?url'
 
 /**
  * The two soft-light washes.
@@ -32,12 +33,16 @@ const urlFor = (id: string): string | null => {
 export function useRenderAssets(): RenderAssets {
   const grunge = useImage(urlFor(OVERLAYS[0].id))
   const sunset = useImage(urlFor(OVERLAYS[1].id))
+  // Imported outright rather than globbed: the wordmark is part of the design,
+  // not an optional texture, so a build that can't find it should fail loudly.
+  const wordmark = useImage(wordmarkUrl)
 
   return useMemo(
     () => ({
       image: getImage,
       overlays: { [OVERLAYS[0].id]: grunge, [OVERLAYS[1].id]: sunset },
+      wordmark,
     }),
-    [grunge, sunset],
+    [grunge, sunset, wordmark],
   )
 }
