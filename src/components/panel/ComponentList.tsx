@@ -28,7 +28,12 @@ export function ComponentList() {
           <span className={subLabelClass}>{group}</span>
           <div className="flex flex-wrap gap-1">
             {kinds.map((kind) => (
-              <Pill key={kind} title={BLOCK_INFO[kind].hint} onClick={() => add(kind)}>
+              <Pill
+                key={kind}
+                className="shrink-0"
+                title={BLOCK_INFO[kind].hint}
+                onClick={() => add(kind)}
+              >
                 {OFFERED_LABELS[kind] ?? BLOCK_INFO[kind].label}
               </Pill>
             ))}

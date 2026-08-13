@@ -88,7 +88,13 @@ function Choice({
         pill again closes rather than reopens.
       */}
       <div className="relative">
-        <Pill open={open} disabled={disabled} title={title} onClick={() => setOpen((o) => !o)}>
+        <Pill
+          className="shrink-0"
+          open={open}
+          disabled={disabled}
+          title={title}
+          onClick={() => setOpen((o) => !o)}
+        >
           {value}
         </Pill>
         {open && !disabled && (

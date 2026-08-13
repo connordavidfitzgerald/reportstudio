@@ -11,12 +11,21 @@ import { isTopmost, useDismiss, useOverlayStack } from '../hooks/useDismiss'
  * and three type sizes — 18 for a section, 12 for a value, 11 for a label.
  */
 
-/** The pill: 32px tall, fully rounded, `#494949`. The shape of every choice. */
+/**
+ * The pill: 32px tall, fully rounded, `#494949`. The shape of every choice.
+ *
+ * Deliberately says nothing about `flex-shrink`. It used to say `shrink-0`,
+ * which quietly beat the `shrink` the panel's chapter pill passes in — two
+ * utilities setting the same property, where the winner is decided by their
+ * order in the generated stylesheet rather than by the order they are written
+ * at the call site. A long chapter name then refused to give way and ran past
+ * the edge of the card. Each caller now states which it wants.
+ */
 const PILL_BASE =
-  'inline-flex h-8 shrink-0 items-center justify-center gap-2.5 rounded-full px-[15px] ' +
+  'inline-flex h-8 items-center justify-center gap-2.5 rounded-full px-[15px] ' +
   'text-xs leading-none transition disabled:cursor-default disabled:opacity-30'
 
-const BUTTON_BASE = `${PILL_BASE} `
+const BUTTON_BASE = `${PILL_BASE} shrink-0 `
 
 const VARIANTS = {
   /** The one action on a panel that people came to perform. */
@@ -129,8 +138,12 @@ export function Pill({
         gets, and a pill that grows past it is cut off by the card's edge — an
         ellipsis is at least honest about there being more, and the `title`
         carries the whole of it.
+
+        `min-w-0` because a flex child's default minimum is its content: without
+        it the span refuses to be narrower than the words it holds, and
+        `truncate` never gets the chance to do anything.
       */}
-      <span className="truncate">{children}</span>
+      <span className="min-w-0 truncate">{children}</span>
     </button>
   )
 }
@@ -343,7 +356,7 @@ export function Segmented<T extends string>({
         <button
           key={o.value}
           onClick={() => onChange(o.value)}
-          className={`${PILL_BASE} ${
+          className={`${PILL_BASE} shrink-0 ${
             value === o.value ? 'bg-ink text-card' : 'bg-control text-ink hover:bg-control/70'
           }`}
         >
