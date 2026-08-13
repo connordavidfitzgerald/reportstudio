@@ -216,6 +216,8 @@ function HitLayer({
 
   if (!width || !height) return null
   const pct = (v: number, of: number) => `${(v / of) * 100}%`
+  /** A block's clickable height: its own, or {@link MIN_HIT_PT}, whichever is more. */
+  const hitH = (h: number, of: number) => Math.max(h, of * (MIN_HIT_PT / PAGE_H))
 
   // Matched by ids rather than by holding the region object: regions are
   // rebuilt on every repaint, so a stored one would pin a stale rect.
@@ -304,9 +306,9 @@ function HitLayer({
               }}
               style={{
                 left: pct(rect.x, width),
-                top: pct(rect.y, height),
+                top: pct(rect.y - (hitH(rect.h, height) - rect.h) / 2, height),
                 width: pct(rect.w, width),
-                height: pct(Math.max(rect.h, 6), height),
+                height: pct(hitH(rect.h, height), height),
               }}
               className={`pointer-events-auto absolute cursor-pointer transition-[outline-color]
                 ${
@@ -489,6 +491,21 @@ function LeafCanvas({
 
 /** Below this many CSS pixels across, a page stops being worth showing two of. */
 const MIN_LEAF_CSS_W = 300
+
+/**
+ * The smallest a component's hit target may be, in points.
+ *
+ * A rule is a hairline and a small spacer is a few points, so their painted
+ * rects are one or two device pixels tall — targets nobody can hit, which made
+ * them impossible to select and therefore impossible to move or delete. The
+ * target grows around the ink rather than downwards from it, so it doesn't
+ * swallow clicks meant for whatever sits below.
+ *
+ * In points because that is the only unit here that doesn't change with the
+ * display: `height` is always `PAGE_H` points of backing store, whatever the
+ * zoom or the pixel ratio.
+ */
+const MIN_HIT_PT = 12
 
 /** Back and forward, for when only one page is on the stage. */
 function PageTurn() {
