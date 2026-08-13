@@ -23,21 +23,21 @@
 // ---------------------------------------------------------------------------
 
 /** A4, in points. */
-export const PAGE_W = 595
-export const PAGE_H = 842
+export const PAGE_W = 595;
+export const PAGE_H = 842;
 
 /**
  * A spread is two leaves side by side, and it is the unit the editor shows and
  * the unit the cover is composed on. Body leaves are still laid out
  * independently — only the cover treats the full 1190 as one canvas.
  */
-export const SPREAD_W = PAGE_W * 2
+export const SPREAD_W = PAGE_W * 2;
 
 /** 40pt on all four sides. */
-export const MARGIN = 40
+export const MARGIN = 40;
 
 /** The text measure: 595 − 2 × 40. */
-export const MEASURE = PAGE_W - MARGIN * 2 // 515
+export const MEASURE = PAGE_W - MARGIN * 2; // 515
 
 // ---------------------------------------------------------------------------
 // The column grid
@@ -64,15 +64,15 @@ export const MEASURE = PAGE_W - MARGIN * 2 // 515
  * The one thing that is deliberately off-grid is a chart bar, whose width *is*
  * its value — snapping it to a column line would misreport the data.
  */
-export const COLS = 9
-export const COL_W = 51
-export const GUTTER = 7
+export const COLS = 9;
+export const COL_W = 51;
+export const GUTTER = 7;
 
 /** Left edge of column `c` (0-based), relative to the content box. */
-export const colX = (c: number): number => c * (COL_W + GUTTER)
+export const colX = (c: number): number => c * (COL_W + GUTTER);
 
 /** Width of a run of `n` columns, gutters included. */
-export const colSpan = (n: number): number => n * COL_W + (n - 1) * GUTTER
+export const colSpan = (n: number): number => n * COL_W + (n - 1) * GUTTER;
 
 // ---------------------------------------------------------------------------
 // Vertical furniture
@@ -87,17 +87,17 @@ export const colSpan = (n: number): number => n * COL_W + (n - 1) * GUTTER
  * `CONTENT_BOTTOM` is confirmed rather than assumed: "Building coalitions", the
  * last line of the resources page, sits exactly on it.
  */
-export const RUNNING_HEAD_Y = 20
-export const HEAD_RULE_Y = 37
-export const CONTENT_TOP = 57
-export const CONTENT_BOTTOM = 802
-export const FOOT_RULE_Y = 822
+export const RUNNING_HEAD_Y = 20;
+export const HEAD_RULE_Y = 37;
+export const CONTENT_TOP = 57;
+export const CONTENT_BOTTOM = 802;
+export const FOOT_RULE_Y = 822;
 
 /** Height available to content on a body leaf. */
-export const CONTENT_H = CONTENT_BOTTOM - CONTENT_TOP // 745
+export const CONTENT_H = CONTENT_BOTTOM - CONTENT_TOP; // 745
 
 /** Hairline rules, above the running head and at the foot of every leaf. */
-export const RULE_WEIGHT = 1
+export const RULE_WEIGHT = 1;
 
 /**
  * There is **no baseline grid**. The file stacks content with auto-layout gaps,
@@ -108,15 +108,15 @@ export const RULE_WEIGHT = 1
  * These are the gaps the file actually uses.
  */
 export const GAP = {
-  /** Within a compound row: rule to content, term to definition. */
-  tight: 5,
-  /** Between TOC entries. */
-  toc: 6,
-  /** Between blocks in a flow, and inside the chart and resources stacks. */
-  block: 10,
-  /** Between definition-list rows. The airiest gap in the system. */
-  defRow: 70,
-} as const
+    /** Within a compound row: rule to content, term to definition. */
+    tight: 5,
+    /** Between TOC entries. */
+    toc: 6,
+    /** Between blocks in a flow, and inside the chart and resources stacks. */
+    block: 10,
+    /** Between definition-list rows. The airiest gap in the system. */
+    defRow: 70,
+} as const;
 
 // ---------------------------------------------------------------------------
 // Colour
@@ -131,13 +131,13 @@ export const GAP = {
  * there is a single paper in the system.
  */
 export const SURFACES = {
-  paper: '#FFFDF2',
-  lime: '#99CC00',
-  ochre: '#CC9900',
-  pink: '#FF669E',
-} as const
+    paper: "#FFFDF2",
+    lime: "#99CC00",
+    ochre: "#CC9900",
+    pink: "#FF669E",
+} as const;
 
-export type SurfaceId = keyof typeof SURFACES
+export type SurfaceId = keyof typeof SURFACES;
 
 /**
  * Ink is black at an alpha over whatever the surface is — never a pre-blended
@@ -149,18 +149,18 @@ export type SurfaceId = keyof typeof SURFACES
  * photograph, `muted` is a chart sub-label under its label.
  */
 export const INK_ALPHA = {
-  strong: 0.8,
-  body: 0.7,
-  soft: 0.6,
-  muted: 0.5,
-} as const
+    strong: 0.8,
+    body: 0.7,
+    soft: 0.6,
+    muted: 0.5,
+} as const;
 
-export type InkAlphaId = keyof typeof INK_ALPHA
+export type InkAlphaId = keyof typeof INK_ALPHA;
 
-export const ink = (alpha: InkAlphaId = 'body'): string => `rgba(0, 0, 0, ${INK_ALPHA[alpha]})`
+export const ink = (alpha: InkAlphaId = "body"): string => `rgba(0, 0, 0, ${INK_ALPHA[alpha]})`;
 
 /** The default ink, which is almost everything. */
-export const INK = ink('body')
+export const INK = ink("body");
 
 /**
  * The swash — the colour rectangle behind a run of text. It takes the spread's
@@ -169,7 +169,7 @@ export const INK = ink('body')
  * is why the quote overlay on the findings plate is an ochre swash.
  */
 export const swashFor = (surface: SurfaceId): string =>
-  surface === 'pink' ? SURFACES.paper : surface === 'ochre' ? SURFACES.ochre : SURFACES.pink
+    surface === "pink" ? SURFACES.paper : surface === "ochre" ? SURFACES.ochre : SURFACES.pink;
 
 /**
  * Vertical breathing room on a swash, above the cap line and below the
@@ -185,10 +185,10 @@ export const swashFor = (surface: SurfaceId): string =>
  *
  * — which is the same voice split, arrived at by hand.
  */
-export const SWASH_PAD_Y = 0.04
+export const SWASH_PAD_Y = 0.04;
 
 /** Horizontal breathing room on a swash, per side. Measured on the TOC rows. */
-export const SWASH_PAD_X = 2
+export const SWASH_PAD_X = 2;
 
 /**
  * Categorical chart colours, in the order the file uses them down the
@@ -199,13 +199,13 @@ export const SWASH_PAD_X = 2
  * the design.
  */
 export const CHART_COLORS = [
-  '#CC9900', // ochre
-  '#99CC00', // lime
-  '#009841', // green
-  '#40B5EA', // blue
-  '#A08EC4', // violet
-  '#FF669E', // pink
-] as const
+    "#CC9900", // ochre
+    "#99CC00", // lime
+    "#009841", // green
+    "#40B5EA", // blue
+    "#A08EC4", // violet
+    "#FF669E", // pink
+] as const;
 
 /**
  * Bar-chart metrics, measured off the methodology plate.
@@ -221,12 +221,12 @@ export const CHART_COLORS = [
  * will not match the file bar for bar, and will be right.
  */
 export const CHART = {
-  barHeight: 121,
-  /** Bar to number/label group. */
-  gutter: 20,
-  rowGap: 7.4,
-  barFull: 362,
-} as const
+    barHeight: 121,
+    /** Bar to number/label group. */
+    gutter: 20,
+    rowGap: 7.4,
+    barFull: 362,
+} as const;
 
 // ---------------------------------------------------------------------------
 // Type
@@ -250,17 +250,17 @@ export const CHART = {
  * of the size, matching the percentages in the file.
  */
 export interface TypeRole {
-  voice: 'display' | 'text'
-  /** Points. Omitted when the role fits itself to the available width. */
-  size?: number
-  lineHeight: number
-  /** Em. */
-  tracking: number
-  case?: 'upper' | 'lower'
-  /** Size to fill the measure instead of using `size`. */
-  autoFit?: boolean
-  /** Default ink for the role; `body` unless stated. */
-  alpha?: InkAlphaId
+    voice: "display" | "text";
+    /** Points. Omitted when the role fits itself to the available width. */
+    size?: number;
+    lineHeight: number;
+    /** Em. */
+    tracking: number;
+    case?: "upper" | "lower";
+    /** Size to fill the measure instead of using `size`. */
+    autoFit?: boolean;
+    /** Default ink for the role; `body` unless stated. */
+    alpha?: InkAlphaId;
 }
 
 /**
@@ -283,72 +283,79 @@ export interface TypeRole {
  * is {@link TYPE.wordmark} — a logo is not type.
  */
 export const TYPE = {
-  // -- page chrome ---------------------------------------------------------
-  runningHead: { voice: 'display', size: 12.6, lineHeight: 1.04, tracking: 0.02, case: 'upper' },
-  folio: { voice: 'display', size: 8, lineHeight: 1.04, tracking: 0.02, case: 'upper' },
+    // -- page chrome ---------------------------------------------------------
+    runningHead: { voice: "display", size: 12.6, lineHeight: 1.04, tracking: 0.02, case: "upper" },
+    folio: { voice: "display", size: 8, lineHeight: 1.04, tracking: 0.02, case: "upper" },
 
-  // -- cover ---------------------------------------------------------------
-  /** 272.8pt in the file, but it is fitted to the spread, not set. */
-  coverTitle: { voice: 'display', lineHeight: 0.8, tracking: 0, autoFit: true, case: 'upper' },
-  coverSubtitle: { voice: 'text', size: 37.1, lineHeight: 1.0, tracking: -0.03 },
-  /**
-   * "Le HUB" on the cover.
-   *
-   * The only display-voice role NOT uppercased, because it is a wordmark rather
-   * than a run of type. The file sets it in Review *Black* at 30.4/50%/−4%;
-   * that cut isn't loaded, so Condensed Heavy stands in and the mixed case is
-   * preserved.
-   */
-  wordmark: { voice: 'display', size: 30.4, lineHeight: 0.5, tracking: -0.04 },
+    // -- cover ---------------------------------------------------------------
+    /** 272.8pt in the file, but it is fitted to the spread, not set. */
+    coverTitle: { voice: "display", lineHeight: 0.8, tracking: 0, autoFit: true, case: "upper" },
+    coverSubtitle: { voice: "text", size: 36, lineHeight: 0.9, tracking: 0 },
+    /**
+     * "Le HUB" on the cover.
+     *
+     * The only display-voice role NOT uppercased, because it is a wordmark rather
+     * than a run of type. The file sets it in Review *Black* at 30.4/50%/−4%;
+     * that cut isn't loaded, so Condensed Heavy stands in and the mixed case is
+     * preserved.
+     */
+    wordmark: { voice: "display", size: 30.4, lineHeight: 0.5, tracking: -0.04 },
 
-  // -- contents ------------------------------------------------------------
-  tocChapter: { voice: 'display', size: 36, lineHeight: 0.8, tracking: 0, case: 'upper' },
-  tocChapterFolio: { voice: 'text', size: 30, lineHeight: 0.9, tracking: 0 },
-  tocSection: { voice: 'text', size: 18, lineHeight: 0.8, tracking: 0, case: 'lower' },
-  /** The "(campaigns/actions)" half of a TOC sub-row, set smaller inline. */
-  tocQualifier: { voice: 'text', size: 14, lineHeight: 0.8, tracking: 0, case: 'lower' },
-  tocSectionFolio: { voice: 'text', size: 13, lineHeight: 0.9, tracking: 0 },
+    // -- contents ------------------------------------------------------------
+    tocChapter: { voice: "display", size: 36, lineHeight: 0.8, tracking: 0, case: "upper" },
+    tocChapterFolio: { voice: "text", size: 30, lineHeight: 0.9, tracking: 0 },
+    tocSection: { voice: "text", size: 18, lineHeight: 0.8, tracking: 0, case: "lower" },
+    /** The "(campaigns/actions)" half of a TOC sub-row, set smaller inline. */
+    tocQualifier: { voice: "text", size: 14, lineHeight: 0.8, tracking: 0, case: "lower" },
+    tocSectionFolio: { voice: "text", size: 13, lineHeight: 0.9, tracking: 0 },
 
-  // -- openers -------------------------------------------------------------
-  chapterTitle: { voice: 'text', size: 53.8, lineHeight: 0.9, tracking: 0 },
-  /** The definition under a chapter title. Same size as `sectionHeading`. */
-  chapterDeck: { voice: 'text', size: 25.9, lineHeight: 1.05, tracking: 0 },
-  /** "Resources", "Related Articles". */
-  sectionHeading: { voice: 'text', size: 25.9, lineHeight: 1.05, tracking: 0 },
+    // -- openers -------------------------------------------------------------
+    chapterTitle: { voice: "text", size: 53.8, lineHeight: 0.9, tracking: 0 },
+    /** The definition under a chapter title. Same size as `sectionHeading`. */
+    chapterDeck: { voice: "text", size: 25.9, lineHeight: 1.05, tracking: 0 },
+    /** "Resources", "Related Articles". */
+    sectionHeading: { voice: "text", size: 25.9, lineHeight: 1.05, tracking: 0 },
 
-  // -- set blocks ----------------------------------------------------------
-  defTerm: { voice: 'display', size: 20, lineHeight: 1.0, tracking: 0.01, case: 'upper' },
-  defBody: { voice: 'text', size: 12.6, lineHeight: 1.05, tracking: 0 },
-  /** Caps in a rule/label/rule band, 23.2pt tall overall. */
-  subhead: { voice: 'text', size: 12.6, lineHeight: 1.04, tracking: 0, case: 'upper' },
-  link: { voice: 'text', size: 18, lineHeight: 1.05, tracking: 0 },
-  caption: { voice: 'text', size: 12.6, lineHeight: 1.05, tracking: 0 },
-  credits: { voice: 'text', size: 12.6, lineHeight: 1.04, tracking: 0 },
+    // -- set blocks ----------------------------------------------------------
+    defTerm: { voice: "display", size: 20, lineHeight: 1.0, tracking: 0.01, case: "upper" },
+    defBody: { voice: "text", size: 12.6, lineHeight: 1.05, tracking: 0 },
+    /** Caps in a rule/label/rule band, 23.2pt tall overall. */
+    subhead: { voice: "text", size: 12.6, lineHeight: 1.04, tracking: 0, case: "upper" },
+    link: { voice: "text", size: 18, lineHeight: 1.05, tracking: 0 },
+    caption: { voice: "text", size: 12.6, lineHeight: 1.05, tracking: 0 },
+    credits: { voice: "text", size: 12.6, lineHeight: 1.04, tracking: 0 },
 
-  // -- shouted -------------------------------------------------------------
-  statement: { voice: 'display', size: 49.3, lineHeight: 0.9, tracking: 0.01, case: 'upper' },
-  /** The "(Ontario, Quebec, …)" line under a statement. */
-  statementNote: { voice: 'display', size: 24, lineHeight: 0.9, tracking: 0.02, case: 'upper' },
-  quoteOverlay: {
-    voice: 'display',
-    size: 29.8,
-    lineHeight: 0.85,
-    tracking: 0.01,
-    case: 'upper',
-    alpha: 'soft',
-  },
+    // -- shouted -------------------------------------------------------------
+    statement: { voice: "display", size: 49.3, lineHeight: 0.9, tracking: 0, case: "upper" },
+    /** The "(Ontario, Quebec, …)" line under a statement. */
+    statementNote: { voice: "display", size: 24, lineHeight: 0.9, tracking: 0.01, case: "upper" },
+    quoteOverlay: {
+        voice: "display",
+        size: 32,
+        lineHeight: 0.83,
+        tracking: 0.015,
+        case: "upper",
+        alpha: "soft",
+    },
 
-  // -- chart ---------------------------------------------------------------
-  /**
-   * 71.2 and 74.4 in the file depending on digit count — optically fitted rather
-   * than set, so this role fits to its box and 74.4 is only the ceiling.
-   */
-  statNumber: { voice: 'display', size: 74.4, lineHeight: 0.9, tracking: 0.01, autoFit: true, case: 'upper' },
-  statLabel: { voice: 'text', size: 13.2, lineHeight: 1.1, tracking: 0.01 },
-  statSublabel: { voice: 'text', size: 13.2, lineHeight: 1.1, tracking: 0.01, alpha: 'muted' },
-} as const satisfies Record<string, TypeRole>
+    // -- chart ---------------------------------------------------------------
+    /**
+     * 71.2 and 74.4 in the file depending on digit count — optically fitted rather
+     * than set, so this role fits to its box and 74.4 is only the ceiling.
+     */
+    statNumber: {
+        voice: "display",
+        size: 74.4,
+        lineHeight: 1.05,
+        tracking: 0.01,
+        autoFit: true,
+        case: "upper",
+    },
+    statLabel: { voice: "text", size: 12, lineHeight: 1.15, tracking: 0.01 },
+    statSublabel: { voice: "text", size: 12, lineHeight: 1.15, tracking: 0.01, alpha: "muted" },
+} as const satisfies Record<string, TypeRole>;
 
-export type TypeRoleId = keyof typeof TYPE
+export type TypeRoleId = keyof typeof TYPE;
 
 /**
  * A role, widened to {@link TypeRole}.
@@ -358,7 +365,7 @@ export type TypeRoleId = keyof typeof TYPE
  * `undefined` — the optional keys only exist on the entries that set them.
  * Reading through here restores the common shape.
  */
-export const typeRole = (id: TypeRoleId): TypeRole => TYPE[id]
+export const typeRole = (id: TypeRoleId): TypeRole => TYPE[id];
 
 // ---------------------------------------------------------------------------
 // Body copy
@@ -381,13 +388,13 @@ export const typeRole = (id: TypeRoleId): TypeRole => TYPE[id]
  * running text at 25.9.
  */
 export const BODY_SIZE = {
-  xs: 12.6,
-  s: 16,
-  m: 18,
-  l: 25.9,
-} as const
+    xs: 12.6,
+    s: 16,
+    m: 18,
+    l: 25.9,
+} as const;
 
-export type BodySizeId = keyof typeof BODY_SIZE
+export type BodySizeId = keyof typeof BODY_SIZE;
 
 /**
  * Running text and set blocks are leaded and tracked differently.
@@ -397,8 +404,8 @@ export type BodySizeId = keyof typeof BODY_SIZE
  * holds for the clear majority, and picking per-paragraph would be noise rather
  * than design.
  */
-export const RUNNING_TEXT = { lineHeight: 1.1, tracking: 0.01 } as const
-export const SET_TEXT = { lineHeight: 1.05, tracking: 0 } as const
+export const RUNNING_TEXT = { lineHeight: 1.1, tracking: 0.01 } as const;
+export const SET_TEXT = { lineHeight: 1.05, tracking: 0 } as const;
 
 /**
  * First-line indent on body copy, with **no** space between paragraphs — classic
@@ -408,7 +415,7 @@ export const SET_TEXT = { lineHeight: 1.05, tracking: 0 } as const
  * indents 12.6pt methodology text and 25.9pt findings text. (An earlier version
  * of this file had it as 2em, which would make it 25pt on the dense pages.)
  */
-export const BODY_INDENT = 64
+export const BODY_INDENT = 64;
 
 // ---------------------------------------------------------------------------
 // Texture
@@ -426,18 +433,18 @@ export const BODY_INDENT = 64
  * extractable — see `export/exportPdf.ts`.
  */
 export const OVERLAYS = [
-  {
-    /** Texturelabs_Grunge_265XL. Placed rotated: 892.4 × 595 on a 595 × 842 page. */
-    id: 'grunge265',
-    blend: 'soft-light',
-    rotated: true,
-    opacity: 1,
-  },
-  {
-    /** "Sunset 001" — a full-page wash. */
-    id: 'sunset001',
-    blend: 'soft-light',
-    rotated: false,
-    opacity: 1,
-  },
-] as const
+    {
+        /** Texturelabs_Grunge_265XL. Placed rotated: 892.4 × 595 on a 595 × 842 page. */
+        id: "grunge265",
+        blend: "soft-light",
+        rotated: true,
+        opacity: 1,
+    },
+    {
+        /** "Sunset 001" — a full-page wash. */
+        id: "sunset001",
+        blend: "soft-light",
+        rotated: false,
+        opacity: 1,
+    },
+] as const;
