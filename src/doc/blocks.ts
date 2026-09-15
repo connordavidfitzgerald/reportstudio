@@ -1,5 +1,5 @@
-import type { ImageRef } from './imageStore'
-import type { BodySizeId, InkAlphaId, SurfaceId } from '../config/brand'
+import type { ImageRef } from './imageRef'
+import { GAP, type BodySizeId, type InkAlphaId, type SurfaceId } from '../config/brand'
 import type { LocalizedText } from './localized'
 import type { MarkMap } from './marks'
 
@@ -11,9 +11,12 @@ import type { MarkMap } from './marks'
  * that none of them use. When a twelfth spread needs something new, add a kind —
  * don't reach for a generic box.
  *
- * A block says *what a thing is* and *which columns it occupies*. It never says
- * what vertical position it has: that is the compositor's return value, which is
- * what makes a mis-stacked page unrepresentable rather than merely discouraged.
+ * A block says *what a thing is*, *which columns it occupies*, and — once
+ * somebody has dragged it — *which row line it starts on*. It has never been
+ * able to say more than that about where it sits, and still can't: `top` is a
+ * floor the flow may push past, not a coordinate (see {@link BlockBase.top}),
+ * so a mis-stacked page — two components overlapping, one above the measure —
+ * stays unrepresentable rather than merely discouraged.
  *
  * Every text-bearing field is {@link LocalizedText}, which is a plain string
  * until it actually needs a translation.
@@ -34,6 +37,41 @@ interface BlockBase {
    */
   col?: number
   span?: number
+  /**
+   * Where this block would like its top edge, in page points.
+   *
+   * ## A floor, not a coordinate
+   *
+   * The compositor stacks the page exactly as it always did, and then, for a
+   * block that has one of these, takes `max(whereTheFlowPutIt, top)`. So it can
+   * push a block *down* the page from where the flow would have put it, and can
+   * never pull it up into the block above: two components cannot be made to
+   * overlap, and nothing can be dragged off the top of the measure. A page
+   * nobody has dragged anything on has none of these and stacks unchanged.
+   *
+   * ## Why the flow stopped being the whole story
+   *
+   * It used to be `gapBefore` — extra room *before* a block, which the flow then
+   * carried down into everything after it. That is the correct model for a
+   * document and the wrong one for a page you are arranging by hand: dragging
+   * one component down the page shoved every component below it down too, so
+   * placing the second thing moved the first, and placing the third moved both.
+   * People who are not typesetters read that as the editor fighting them.
+   *
+   * A top that the flow cannot pull back up gives the same guarantee (no
+   * overlap, nothing above the measure) without the knock-on. `moveBlockTo`
+   * pins the rest of the leaf where it already sits when a drag lands, so the
+   * thing you dropped is the only thing that moved.
+   *
+   * ## It is always on a snap line
+   *
+   * Written only by a drag, and only ever to a line the drag offered: a row line
+   * of the {@link import('../config/brand').ROWS} grid, the foot of a
+   * neighbouring block plus `GAP.block`, or the bottom margin less this block's
+   * own height. See `placementAt` in `components/canvas/useBlockDrag.ts`.
+   * Absent — which is every block until somebody moves it — means pure flow.
+   */
+  top?: number
   /** Force this block onto a new leaf. */
   breakBefore?: boolean
   /** Don't strand this block at the foot of a leaf. Default true for headings. */
@@ -78,13 +116,23 @@ export interface DeckBlock extends BlockBase {
 }
 
 /**
- * Running text at the leaf's body size, first-line indented by a flat 64pt with
- * no space between paragraphs.
+ * Running text at the leaf's body size.
+ *
+ * `indent` opts into the classic book setting the file uses on its long-form
+ * pages: a flat 64pt first line, no space between paragraphs. It is **off by
+ * default**, which is the opposite of what this block used to do.
+ *
+ * The reason is that the default is what an empty paragraph gets when somebody
+ * adds one, and a lone indented paragraph on a page is not book setting — it is
+ * a typo. Indent-by-default only reads as a design where paragraphs run on in a
+ * column, which is a decision about the page, not about the block. Documents
+ * written before this flip carry an explicit `indent: true` (migration v9), so
+ * nothing already set reflows.
  */
 export interface ParaBlock extends BlockBase {
   kind: 'para'
   text: LocalizedText
-  /** False for an opening paragraph, which is set flush. */
+  /** True for running text set as a book sets it. See above. */
   indent?: boolean
   /** Override the leaf's body size for this one block. */
   size?: BodySizeId
@@ -139,14 +187,17 @@ export interface QuoteBlock extends BlockBase {
 /**
  * The big condensed statement, on a swash that hugs each wrapped line.
  *
- * `highlights` are the phrases that sit *on* the swash; everything else is set
- * at the `strong` ink alpha over the bare surface. On the exec-summary plate
- * that is "21 ORGANIZERS", "16 ORGANIZATIONS" and "6 PROVINCES".
+ * The phrases that sit *on* the swash are `h` marks over `text` (see
+ * `doc/marks.ts`); everything else is set at the `strong` ink alpha over the
+ * bare surface. On the exec-summary plate that is "21 ORGANIZERS",
+ * "16 ORGANIZATIONS" and "6 PROVINCES".
+ *
+ * They used to be a `highlights: string[]` of phrases matched against the text
+ * at paint time. Migration v9 converted them to marks.
  */
 export interface StatementBlock extends BlockBase {
   kind: 'statement'
   text: LocalizedText
-  highlights?: string[]
   /** The "(Ontario, Quebec, …)" line under it. */
   note?: LocalizedText
 }
@@ -191,6 +242,39 @@ export interface BulletListBlock extends BlockBase {
 export interface LinksBlock extends BlockBase {
   kind: 'links'
   items: { label: LocalizedText; href?: string; note?: LocalizedText }[]
+}
+
+/**
+ * Rows and columns of text, on the nine-column grid.
+ *
+ * ## `widths` are weights, not spans
+ *
+ * The obvious model is "column 1 is three grid columns wide". It breaks the
+ * moment the block itself is resized — drag a table from nine columns down to
+ * six and every stored width is now a lie, and the painter has to either
+ * overflow the measure or silently rewrite the document as it draws.
+ *
+ * So a width is a *share*. `[2, 1, 1]` means the first column gets twice what
+ * the others do, whatever the block currently spans, and `render/compose.ts`
+ * allocates whole grid columns against those shares at paint time. The table
+ * is always on the grid and always inside its own run, and neither fact depends
+ * on the document being kept in step with itself.
+ *
+ * ## Not splittable
+ *
+ * A table that ran over a page break would need its header repeated on the
+ * second page, its rows split only between rows, and a rule at both edges of
+ * the break. None of that is hard, and all of it is a second feature — see
+ * `isSplittable` below, where the choice is stated rather than assumed.
+ */
+export interface TableBlock extends BlockBase {
+  kind: 'table'
+  /** Relative share of the measure per column. Length is the column count. */
+  widths: number[]
+  /** Set the first row as a header: caps, with a rule under it. */
+  header?: boolean
+  /** Row-major: `rows[r][c]`. Every row has `widths.length` cells. */
+  rows: LocalizedText[][]
 }
 
 /** Stacked label/value credits — the colophon. */
@@ -284,6 +368,23 @@ export interface TocEntryBlock extends BlockBase {
 // ---------------------------------------------------------------------------
 
 /**
+ * The table of contents, worked out from the document rather than typed.
+ *
+ * Carries nothing at all — every row, every section under it and every page
+ * number comes from `deriveContents` at paint time. That is the whole feature:
+ * set a chapter on a page in Page Settings and it appears here; move a spread
+ * and the numbers follow; and the contents can never quietly disagree with the
+ * pages it points at, which is exactly what {@link TocEntryBlock} could always
+ * do, since its folio was a number somebody typed and nothing ever checked.
+ *
+ * `tocEntry` is kept for the row somebody wants to place and word by hand, and
+ * for the documents that already contain them.
+ */
+export interface ContentsBlock extends BlockBase {
+  kind: 'contents'
+}
+
+/**
  * The cover, as one component.
  *
  * It is a single block rather than a stack of generic ones because it is the
@@ -338,10 +439,12 @@ export type Block =
   | BulletListBlock
   | LinksBlock
   | CreditsBlock
+  | TableBlock
   | FigureBlock
   | BandBlock
   | ChartBlock
   | TocEntryBlock
+  | ContentsBlock
   | CoverBlock
   | TextBlock
 
@@ -366,7 +469,25 @@ export type BlockSeed = {
  * Definition and link lists split *between* rows, never inside one — a term
  * separated from its definition would be worse than a short page.
  */
+/**
+ * The clearance between a dragged block and the one it is tucked under.
+ *
+ * `GAP.block` — the gap the design system already puts between every two
+ * components — so "put this directly below that" produces the spacing the
+ * stack would have produced anyway, and a block cannot come to rest 3pt under
+ * its neighbour looking like a collision.
+ *
+ * This is one of the snap targets a vertical drag offers; the others are the
+ * row lines in `config/brand.ts`. Note that neither is a baseline grid, which
+ * that module is emphatic the design does not have: this snaps where a
+ * *component* starts, never the lines of type inside it.
+ */
+export const DROP_CLEARANCE = GAP.block
+
 export const isSplittable = (b: Block): boolean =>
+  // Deliberately not `table`: see the note on {@link TableBlock}. A table that
+  // broke across leaves would need its header repeated on the second page and
+  // a rule at both sides of the break, and half of that is worse than none.
   b.kind === 'para' || b.kind === 'bulletList' || b.kind === 'defList' || b.kind === 'links'
 
 /** Headings hold onto what follows them; nothing else does by default. */
@@ -382,7 +503,18 @@ export const keepsWithNext = (b: Block): boolean =>
  * fallback changes the design rather than rescuing it.
  */
 export const wantsSwash = (b: Block): boolean =>
-  b.kind === 'statement' || b.kind === 'quoteOverlay' || b.kind === 'tocEntry'
+  b.kind === 'quoteOverlay' ||
+  b.kind === 'tocEntry' ||
+  // A statement only wants one if some of its words are actually highlighted.
+  // It is the common case, but an unhighlighted statement on a pink page is
+  // fine and warning about it would be noise.
+  (b.kind === 'statement' && hasHighlight(b))
+
+/** Does any field of this block carry a highlight mark, in any language? */
+const hasHighlight = (b: Block): boolean =>
+  Object.values(b.marks ?? {}).some((byLang) =>
+    Object.values(byLang).some((marks) => marks?.some((m) => m.h)),
+  )
 
 export const swashClashes = (b: Block, surface: SurfaceId): boolean =>
   wantsSwash(b) && surface === 'pink'

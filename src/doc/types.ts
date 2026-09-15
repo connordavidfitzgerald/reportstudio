@@ -1,4 +1,4 @@
-import type { ImageRef } from './imageStore'
+import type { ImageRef } from './imageRef'
 import type { BodySizeId, SurfaceId } from '../config/brand'
 import type { Block } from './blocks'
 import { t, type Lang, type LocalizedText } from './localized'
@@ -200,6 +200,67 @@ export function spreadLabel(deck: Deck, index: number, kind: 'full' | 'pair'): s
   if (right === null) return `Page ${left}`
   if (left === null) return `Page ${right}`
   return `Pages ${left} & ${right}`
+}
+
+/** One chapter of a derived table of contents, with its sections under it. */
+export interface ContentsRow {
+  label: string
+  folio: number | null
+  sections: { label: string; folio: number | null }[]
+}
+
+/**
+ * The table of contents, worked out from the document.
+ *
+ * ## Why this is derived and the old one wasn't
+ *
+ * A `tocEntry` block carries a `folio: number` somebody typed. Nothing has ever
+ * checked it against `folioOf`, so a contents page and the pages it points at
+ * could disagree indefinitely, and inserting a single spread near the front
+ * quietly falsified every row below it. The contents was also *authored*: three
+ * chapters on the page meant three blocks placed by hand, and a fourth chapter
+ * added to the document appeared nowhere until somebody remembered.
+ *
+ * Both problems are the same problem — the contents was a second copy of
+ * something the document already knew. `leaf.chapter` and `leaf.section` are
+ * where a page says what it belongs to, and `folioOf` is where a page number
+ * comes from. This composes the two, at paint time, so a contents page cannot
+ * be out of date.
+ *
+ * A chapter's folio is the first page carrying it. Null where that page prints
+ * no folio at all — a cover or a bare plate — which the painter shows as a row
+ * with no number rather than inventing one.
+ */
+export function deriveContents(deck: Deck, lang: Lang): ContentsRow[] {
+  const rows: ContentsRow[] = []
+  const byLabel = new Map<string, ContentsRow>()
+
+  deck.leaves.forEach((leaf, index) => {
+    // A contents page does not list itself. Its own leaf carries a chapter like
+    // any other ("Table of contents"), and without this the first row of every
+    // contents page would be the page you are looking at.
+    if (leaf.blocks.some((b) => b.kind === 'contents')) return
+
+    const chapter = t(leaf.chapter, lang).trim()
+    if (!chapter) return
+
+    let row = byLabel.get(chapter)
+    if (!row) {
+      row = { label: chapter, folio: folioOf(deck, index), sections: [] }
+      byLabel.set(chapter, row)
+      rows.push(row)
+    }
+
+    // A section is only a row of its own when it is named and differs from its
+    // chapter — `runningHeadOf` treats a section equal to its chapter as just
+    // the chapter, and a contents that listed both would say it twice.
+    const section = t(leaf.section, lang).trim()
+    if (!section || section === chapter) return
+    if (row.sections.some((s) => s.label === section)) return
+    row.sections.push({ label: section, folio: folioOf(deck, index) })
+  })
+
+  return rows
 }
 
 /**

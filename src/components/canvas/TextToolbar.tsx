@@ -1,7 +1,7 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { BODY_SIZE, type BodySizeId } from '../../config/brand'
 import type { Block } from '../../doc/blocks'
-import { t } from '../../doc/localized'
+import { fieldText, pathOf } from '../../doc/fieldValue'
 import {
   activeAt,
   marksAt,
@@ -36,16 +36,6 @@ import { Dropdown, DropdownItem, Pill } from '../ui'
  * `onBlur` also ignores blurs into `[data-text-toolbar]`, which is the other
  * half of the same problem.
  */
-
-/** The plain text of the field the caret is in, by its dotted path. */
-function fieldText(block: Block, path: string, lang: 'en' | 'fr'): string {
-  let node: unknown = block
-  for (const key of path.split('.')) {
-    if (node === null || node === undefined) return ''
-    node = (node as Record<string, unknown>)[key]
-  }
-  return t(node as never, lang)
-}
 
 /** The 11px label that names a group of controls. */
 function Label({ children }: { children: ReactNode }) {
@@ -172,11 +162,11 @@ export function TextToolbar() {
   const markable = supportsMarks(block.kind)
   const range =
     markable && caret && caret.blockId === block.id && caret.to > caret.from ? caret : null
-  const text = range ? fieldText(block, range.path, lang) : ''
+  const text = range ? fieldText(block, pathOf(range.path), lang) : ''
   const marks = range ? marksAt(block.marks, range.path, lang) : undefined
   const active = range
     ? activeAt(marks ?? [], text, range.from, range.to)
-    : { b: false, i: false, u: false, href: null }
+    : { b: false, i: false, u: false, h: false, href: null }
 
   const mark = (flag: Flag) => {
     if (!range) return
@@ -234,6 +224,12 @@ export function TextToolbar() {
         <Key title={markable ? "Underline — ⌘U" : "This component's type is set by the design system."} disabled={!range} active={active.u} onClick={() => mark('u')}>
           <span className="underline">U</span>
         </Key>
+        <Key title={markable ? 'Highlight — ⌘⇧H' : "This component's type is set by the design system."} disabled={!range} active={active.h} onClick={() => mark('h')}>
+          {/* The key wears the effect it applies: the letter on the swash. The
+            * swash is the *brand* pink, not the selection blue, because that is
+            * the colour the words will actually be set on. */}
+          <span className="bg-accent px-1 text-black">H</span>
+        </Key>
         <Key title={markable ? 'Link' : "This component's type is set by the design system."} disabled={!range} active={!!active.href} onClick={link}>
           Link
         </Key>
@@ -282,21 +278,72 @@ export function TextToolbar() {
         }
       </Choice>
 
-      <Choice label="Width/Position" value={run?.label ?? `Columns ${col + 1}–${col + span}`}>
-        {(close) =>
-          COLUMN_RUNS.map((option) => (
-            <DropdownItem
-              key={option.id}
-              current={run?.id === option.id}
-              onClick={() => {
-                updateBlock(block.id, { col: option.col, span: option.span })
-                close()
-              }}
-            >
-              {option.label}
-            </DropdownItem>
-          ))
+      {/*
+        Indent sits with width and position because it is the same kind of
+        decision — where the words start — and not with bold, which is about
+        which words. It is a paragraph-level setting, so it is shown and
+        disabled elsewhere rather than appearing and vanishing.
+      */}
+      <Key
+        title={
+          block.kind === 'para'
+            ? 'Indent the first line'
+            : 'Only running text is indented.'
         }
+        disabled={block.kind !== 'para'}
+        active={block.kind === 'para' && block.indent === true}
+        onClick={() =>
+          updateBlock(block.id, { indent: !(block.kind === 'para' && block.indent) } as Partial<Block>)
+        }
+      >
+        <svg width="14" height="11" viewBox="0 0 14 11" aria-hidden="true">
+          <g fill="currentColor">
+            <rect x="5" y="0" width="9" height="1.4" />
+            <rect x="0" y="3.2" width="14" height="1.4" />
+            <rect x="0" y="6.4" width="14" height="1.4" />
+            <rect x="0" y="9.6" width="9" height="1.4" />
+          </g>
+        </svg>
+      </Key>
+
+      <Choice label="Width/Position" value={run?.label ?? `Columns ${col + 1}–${col + span}`}>
+        {(close) => (
+          <>
+            {COLUMN_RUNS.map((option) => (
+              <DropdownItem
+                key={option.id}
+                current={run?.id === option.id}
+                onClick={() => {
+                  updateBlock(block.id, { col: option.col, span: option.span })
+                  close()
+                }}
+              >
+                {option.label}
+              </DropdownItem>
+            ))}
+            {/*
+              The way out of a place you dragged something to.
+
+              Dragging is easy to do and, until this, impossible to undo except
+              by dragging back to a row line you would have to identify by eye —
+              and a block that has been nudged twice has no "where it was" left
+              to aim at. Offered only when there is something to clear, so the
+              menu says nothing about the flow for the blocks that are simply in
+              it, which is most of them.
+            */}
+            {block.top !== undefined && (
+              <DropdownItem
+                current={false}
+                onClick={() => {
+                  updateBlock(block.id, { top: undefined })
+                  close()
+                }}
+              >
+                Back to the flow
+              </DropdownItem>
+            )}
+          </>
+        )}
       </Choice>
 
     </div>

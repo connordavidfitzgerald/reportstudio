@@ -13,10 +13,10 @@ export function OverflowNote({ culprit, leafIndex }: { culprit: Block | null; le
     BODY_SIZE_OPTIONS[BODY_SIZE_OPTIONS.findIndex((o) => o.value === leaf.bodySize) - 1]
 
   const action =
-    'rounded-full bg-[#FF8FA3]/15 px-2.5 py-1 leading-none transition hover:bg-[#FF8FA3]/30'
+    'rounded-full bg-danger/15 px-2.5 py-1 leading-none transition hover:bg-danger/30'
 
   return (
-    <div className="flex flex-col gap-2 rounded-2xl bg-[#FF8FA3]/10 p-2.5 text-2xs leading-snug text-[#FF8FA3]">
+    <div className="flex flex-col gap-2 rounded-2xl bg-danger/10 p-2.5 text-2xs leading-snug text-danger">
       <p>
         This page runs past its foot rule
         {culprit ? (

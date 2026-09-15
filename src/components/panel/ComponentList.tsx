@@ -4,14 +4,20 @@ import { useDeck } from '../../store/useDeck'
 import { Pill, subLabelClass } from '../ui'
 
 /**
- * The palette: the eleven things a page is built out of.
+ * The palette: the things a page is built out of.
  *
  * Clicking one adds it — to the slot armed by a "+" between two components on
  * the page if there is one, otherwise to the end. There is no chooser to open
  * first and nothing to confirm, because adding a component is cheap and undoing
  * it is one keystroke.
+ *
+ * Rendered twice: here in the panel, and in a popover at the "+" itself (see
+ * `SpreadCanvas`). The second is the one people actually use — pressing a "+"
+ * only *armed* a slot and then sent you 188px left to the panel to say what
+ * went in it, so the commonest action in the editor crossed the window and came
+ * back. `onPick` is how the popover closes itself afterwards.
  */
-export function ComponentList() {
+export function ComponentList({ onPick }: { onPick?: () => void } = {}) {
   const addBlock = useDeck((s) => s.addBlock)
   const insertAt = useDeck((s) => s.insertAt)
   const setInsertAt = useDeck((s) => s.setInsertAt)
@@ -19,6 +25,7 @@ export function ComponentList() {
   const add = (kind: BlockKind) => {
     addBlock(kind, insertAt ?? undefined)
     setInsertAt(null)
+    onPick?.()
   }
 
   return (

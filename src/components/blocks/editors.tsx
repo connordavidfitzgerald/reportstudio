@@ -1,137 +1,48 @@
-import { BODY_SIZE, type BodySizeId, type SurfaceId } from '../../config/brand'
+import { type SurfaceId } from '../../config/brand'
 import type {
   BandBlock,
   BulletListBlock,
   ChartBlock,
   CoverBlock,
-  CreditsBlock,
-  DefListBlock,
   FigureBlock,
   LinksBlock,
-  ParaBlock,
-  QuoteBlock,
   QuoteOverlayBlock,
   SpacerBlock,
-  StatementBlock,
+  TableBlock,
   TextBlock,
   TocEntryBlock,
 } from '../../doc/blocks'
-import { t, type LocalizedText } from '../../doc/localized'
+import { t } from '../../doc/localized'
 import { useDeck } from '../../store/useDeck'
 import { ImageField } from '../ImageField'
-import { Choice, Field, LocalizedField, NumberField, RepeatableRows, Toggle } from './fields'
+import { Choice, Field, NumberField, Toggle } from './fields'
 import { BODY_SIZE_OPTIONS, SURFACE_OPTIONS } from './options'
 
 /**
- * One editor per component kind.
+ * The settings a component has that are **not** words on the page.
  *
- * Everything a block can express is reachable from here. That sounds obvious,
- * and it is exactly what was missing: the previous inspector edited `block.text`
- * and nothing else, so a definition list, a chart or the cover's own title
- * could be *added* to a page and then never changed.
+ * ## What is no longer here
+ *
+ * Every text field. This file used to hold a `LocalizedField` for each of a
+ * block's strings — a paragraph's body, a quote and its attribution, a
+ * definition list's terms, the cover's title — and a `RepeatableRows` to add
+ * and remove rows. All of that is typed on the page now: the painters emit a
+ * region for every run of words they draw (`render/compose.ts`), the caret goes
+ * in it, and Enter and Backspace open and close rows (`doc/rows.ts`).
+ *
+ * Which leaves a much smaller and much clearer question for this file: what
+ * about a component is *not* a thing you could point at? A figure's image, a
+ * band's paper, how many columns a list runs in, a link's address. Those have
+ * no representation on the page to click, so they need a control — and only
+ * those do.
+ *
+ * ## The shape of what is left
+ *
+ * Eight kinds have settings. The other twelve have none at all and return null,
+ * which is what `hasBlockSettings` in `./index.tsx` reports, so no control
+ * appears on a paragraph promising something behind it and then showing an
+ * empty card.
  */
-
-// ---------------------------------------------------------------------------
-// Prose
-// ---------------------------------------------------------------------------
-
-export function ParaEditor({
-  block,
-  patch,
-}: {
-  block: ParaBlock
-  patch: (p: Partial<ParaBlock>) => void
-}) {
-  const pageSize = useDeck((s) => s.deck.leaves[s.leafIndex]?.bodySize ?? 'xs')
-  return (
-    <>
-      <LocalizedField value={block.text} onChange={(text) => patch({ text })} multiline rows={6} />
-      <Toggle
-        label="Indent the first line"
-        checked={block.indent !== false}
-        onChange={(indent) => patch({ indent })}
-        hint="Off for the paragraph that opens a section — the design sets those flush."
-      />
-      <Choice<BodySizeId | 'page'>
-        label="Size (this paragraph only)"
-        value={block.size ?? 'page'}
-        options={[{ value: 'page', label: 'Page' }, ...BODY_SIZE_OPTIONS]}
-        onChange={(size) => patch({ size: size === 'page' ? undefined : size })}
-        hint={`The rest of the page is set at ${BODY_SIZE[pageSize]}pt.`}
-      />
-    </>
-  )
-}
-
-export function QuoteEditor({
-  block,
-  patch,
-}: {
-  block: QuoteBlock
-  patch: (p: Partial<QuoteBlock>) => void
-}) {
-  return (
-    <>
-      <LocalizedField value={block.text} onChange={(text) => patch({ text })} multiline rows={4} />
-      <LocalizedField
-        label="Attribution"
-        value={block.attribution}
-        onChange={(attribution) => patch({ attribution })}
-        placeholder="— an organizer, Ontario"
-      />
-    </>
-  )
-}
-
-export function StatementEditor({
-  block,
-  patch,
-}: {
-  block: StatementBlock
-  patch: (p: Partial<StatementBlock>) => void
-}) {
-  const lang = useDeck((s) => s.deck.lang)
-  const body = t(block.text, lang)
-  const highlights = block.highlights ?? []
-
-  return (
-    <>
-      <LocalizedField value={block.text} onChange={(text) => patch({ text })} multiline rows={4} />
-
-      <RepeatableRows
-        label="Phrases on the colour"
-        rows={highlights}
-        onChange={(next) => patch({ highlights: next })}
-        blank={() => ''}
-        addLabel="Add a phrase"
-        hint="Each phrase is set on the swash. It has to appear in the text above, word for word."
-        render={(phrase, set, i) => (
-          <>
-            <Field>
-              <input
-                value={phrase}
-                onChange={(e) => set(e.target.value)}
-                className="w-full border border-ink/25 bg-control px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-black"
-              />
-            </Field>
-            {phrase !== '' && !body.includes(phrase) && (
-              <p key={i} className="px-1 text-[11px] text-[#FF8FA3]">
-                Not found in the text — this phrase won't be highlighted.
-              </p>
-            )}
-          </>
-        )}
-      />
-
-      <LocalizedField
-        label="Note underneath"
-        value={block.note}
-        onChange={(note) => patch({ note })}
-        placeholder="(Ontario, Quebec, British Columbia)"
-      />
-    </>
-  )
-}
 
 export function QuoteOverlayEditor({
   block,
@@ -141,18 +52,15 @@ export function QuoteOverlayEditor({
   patch: (p: Partial<QuoteOverlayBlock>) => void
 }) {
   return (
-    <>
-      <LocalizedField value={block.text} onChange={(text) => patch({ text })} multiline rows={4} />
-      <NumberField
-        label="Height on the page"
-        value={Math.round((block.atY ?? 0.5) * 100)}
-        min={0}
-        max={100}
-        step={5}
-        suffix="% from the top"
-        onChange={(v) => patch({ atY: v / 100 })}
-      />
-    </>
+    <NumberField
+      label="Height on the page"
+      value={Math.round((block.atY ?? 0.5) * 100)}
+      min={0}
+      max={100}
+      step={5}
+      suffix="% from the top"
+      onChange={(v) => patch({ atY: v / 100 })}
+    />
   )
 }
 
@@ -195,7 +103,6 @@ export function TextEditor({
 }) {
   return (
     <>
-      <LocalizedField value={block.text} onChange={(text) => patch({ text })} multiline rows={3} />
       <Choice
         label="Style"
         value={block.role}
@@ -230,7 +137,6 @@ export function BandEditor({
 }) {
   return (
     <>
-      <LocalizedField value={block.text} onChange={(text) => patch({ text })} multiline rows={2} />
       <Choice
         label="Colour"
         value={block.surface}
@@ -259,40 +165,6 @@ export function BandEditor({
   )
 }
 
-// ---------------------------------------------------------------------------
-// Lists
-// ---------------------------------------------------------------------------
-
-export function DefListEditor({
-  block,
-  patch,
-}: {
-  block: DefListBlock
-  patch: (p: Partial<DefListBlock>) => void
-}) {
-  return (
-    <RepeatableRows
-      label="Terms"
-      rows={block.rows}
-      onChange={(rows) => patch({ rows })}
-      blank={() => ({ term: '', def: '' })}
-      addLabel="Add a term"
-      render={(row, set) => (
-        <>
-          <LocalizedField label="Term" value={row.term} onChange={(term) => set({ ...row, term })} />
-          <LocalizedField
-            label="Definition"
-            value={row.def}
-            onChange={(def) => set({ ...row, def })}
-            multiline
-            rows={3}
-          />
-        </>
-      )}
-    />
-  )
-}
-
 export function BulletListEditor({
   block,
   patch,
@@ -301,28 +173,29 @@ export function BulletListEditor({
   patch: (p: Partial<BulletListBlock>) => void
 }) {
   return (
-    <>
-      <RepeatableRows
-        label="Items"
-        rows={block.items}
-        onChange={(items) => patch({ items })}
-        blank={() => '' as LocalizedText}
-        addLabel="Add an item"
-        render={(item, set) => <LocalizedField value={item} onChange={set} />}
-      />
-      <Choice
-        label="Columns"
-        value={String(block.columns ?? 1) as '1' | '2'}
-        options={[
-          { value: '1', label: 'One' },
-          { value: '2', label: 'Two' },
-        ]}
-        onChange={(v) => patch({ columns: v === '2' ? 2 : 1 })}
-      />
-    </>
+    <Choice
+      label="Columns"
+      value={String(block.columns ?? 1) as '1' | '2'}
+      options={[
+        { value: '1', label: 'One' },
+        { value: '2', label: 'Two' },
+      ]}
+      onChange={(v) => patch({ columns: v === '2' ? 2 : 1 })}
+    />
   )
 }
 
+/**
+ * Addresses, one per link.
+ *
+ * The link *text* is on the page and is typed there; a URL is not on the page
+ * at all — it is what the underline means — so it has nowhere to be clicked and
+ * needs a field. Each one is labelled with the words it sits under, so the list
+ * reads as the page reads rather than as "Link 1, Link 2".
+ *
+ * Rows are added and removed on the page with Enter and Backspace, so there are
+ * no add or remove buttons here.
+ */
 export function LinksEditor({
   block,
   patch,
@@ -330,70 +203,80 @@ export function LinksEditor({
   block: LinksBlock
   patch: (p: Partial<LinksBlock>) => void
 }) {
+  const lang = useDeck((s) => s.deck.lang)
+  const set = (i: number, href: string | undefined) =>
+    patch({ items: block.items.map((row, n) => (n === i ? { ...row, href } : row)) })
+
   return (
-    <RepeatableRows
-      label="Links"
-      rows={block.items}
-      onChange={(items) => patch({ items })}
-      blank={() => ({ label: '' })}
-      addLabel="Add a link"
-      render={(row, set) => (
-        <>
-          <LocalizedField
-            label="Text"
-            value={row.label}
-            onChange={(label) => set({ ...row, label })}
+    <>
+      {block.items.map((row, i) => (
+        <Field key={i} label={t(row.label, lang) || `Link ${i + 1}`}>
+          <input
+            value={row.href ?? ''}
+            placeholder="https://…"
+            onChange={(e) => set(i, e.target.value || undefined)}
+            className="w-full border border-ink/25 bg-control px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-black"
           />
-          <Field label="Address">
-            <input
-              value={row.href ?? ''}
-              placeholder="https://…"
-              onChange={(e) => set({ ...row, href: e.target.value || undefined })}
-              className="w-full border border-ink/25 bg-control px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-black"
-            />
-          </Field>
-          <LocalizedField
-            label="Note"
-            value={row.note}
-            onChange={(note) => set({ ...row, note })}
-            multiline
-            rows={2}
-          />
-        </>
-      )}
-    />
+        </Field>
+      ))}
+    </>
   )
 }
 
-export function CreditsEditor({
+/**
+ * A table's shape: whether the first row is a header, and the column shares.
+ *
+ * Cells are typed on the page and rows are opened with Tab, so neither is here.
+ * What is here is what a cell cannot tell you by being clicked: that the top row
+ * is set as a header, and how the measure is divided between the columns.
+ *
+ * The shares are whole numbers because that is how they read — `2 1 1` is "the
+ * first is twice the others" — and `render/compose.ts` turns them into grid
+ * columns. Nothing has to add up to anything.
+ */
+export function TableEditor({
   block,
   patch,
 }: {
-  block: CreditsBlock
-  patch: (p: Partial<CreditsBlock>) => void
+  block: TableBlock
+  patch: (p: Partial<TableBlock>) => void
 }) {
+  const setWidth = (i: number, v: number) =>
+    patch({ widths: block.widths.map((w, n) => (n === i ? Math.max(1, v) : w)) })
+
+  const setColumns = (count: number) => {
+    const n = Math.max(1, Math.min(6, count))
+    patch({
+      widths: Array.from({ length: n }, (_, i) => block.widths[i] ?? 1),
+      rows: block.rows.map((row) => Array.from({ length: n }, (_, i) => row[i] ?? '')),
+    })
+  }
+
   return (
-    <RepeatableRows
-      label="Credits"
-      rows={block.rows}
-      onChange={(rows) => patch({ rows })}
-      blank={() => ({ label: '', value: '' })}
-      addLabel="Add a credit"
-      render={(row, set) => (
-        <>
-          <LocalizedField
-            label="Role"
-            value={row.label}
-            onChange={(label) => set({ ...row, label })}
-          />
-          <LocalizedField
-            label="Name"
-            value={row.value}
-            onChange={(value) => set({ ...row, value })}
-          />
-        </>
-      )}
-    />
+    <>
+      <Toggle
+        label="First row is a header"
+        checked={!!block.header}
+        onChange={(header) => patch({ header: header || undefined })}
+      />
+      <NumberField
+        label="Columns"
+        value={block.widths.length}
+        min={1}
+        max={6}
+        onChange={setColumns}
+      />
+      {block.widths.map((w, i) => (
+        <NumberField
+          key={i}
+          label={`Column ${i + 1} share`}
+          value={w}
+          min={1}
+          max={9}
+          onChange={(v) => setWidth(i, v)}
+        />
+      ))}
+    </>
   )
 }
 
@@ -406,35 +289,6 @@ export function ChartEditor({
 }) {
   return (
     <>
-      <RepeatableRows
-        label="Bars"
-        rows={block.series}
-        onChange={(series) => patch({ series })}
-        blank={() => ({ label: '', value: 0 })}
-        addLabel="Add a bar"
-        hint="A bar's width is its value — this is the one place the design leaves the column grid."
-        render={(row, set) => (
-          <>
-            <LocalizedField
-              label="Label"
-              value={row.label}
-              onChange={(label) => set({ ...row, label })}
-            />
-            <LocalizedField
-              label="Sub-label"
-              value={row.sublabel}
-              onChange={(sublabel) => set({ ...row, sublabel })}
-            />
-            <NumberField
-              label="Value"
-              value={row.value}
-              min={0}
-              step={0.5}
-              onChange={(value) => set({ ...row, value })}
-            />
-          </>
-        )}
-      />
       <Field label="Unit" hint="Appended to every value. Leave empty for a plain count.">
         <input
           value={block.unit ?? ''}
@@ -454,6 +308,14 @@ export function ChartEditor({
   )
 }
 
+/**
+ * Page numbers on a hand-authored contents row.
+ *
+ * Only the numbers: the chapter and its sections are words on the page and are
+ * typed there. Note that a `contents` block works all of this out from the
+ * document itself and needs no editor at all — this is for the rows somebody
+ * has placed by hand.
+ */
 export function TocEntryEditor({
   block,
   patch,
@@ -461,49 +323,38 @@ export function TocEntryEditor({
   block: TocEntryBlock
   patch: (p: Partial<TocEntryBlock>) => void
 }) {
+  const lang = useDeck((s) => s.deck.lang)
   return (
     <>
-      <LocalizedField label="Chapter" value={block.label} onChange={(label) => patch({ label })} />
       <NumberField
-        label="Page"
+        label={t(block.label, lang) || 'Chapter'}
         value={block.folio}
         min={1}
         onChange={(folio) => patch({ folio })}
       />
-      <RepeatableRows
-        label="Sections"
-        rows={block.sections ?? []}
-        onChange={(sections) => patch({ sections })}
-        blank={() => ({ label: '', folio: block.folio })}
-        addLabel="Add a section"
-        render={(row, set) => (
-          <>
-            <LocalizedField value={row.label} onChange={(label) => set({ ...row, label })} />
-            <LocalizedField
-              label="Parenthetical"
-              value={row.qualifier}
-              onChange={(qualifier) => set({ ...row, qualifier })}
-              placeholder="(campaigns/actions)"
-            />
-            <NumberField
-              label="Page"
-              value={row.folio}
-              min={1}
-              onChange={(folio) => set({ ...row, folio })}
-            />
-          </>
-        )}
-      />
+      {(block.sections ?? []).map((row, i) => (
+        <NumberField
+          key={i}
+          label={t(row.label, lang) || `Section ${i + 1}`}
+          value={row.folio}
+          min={1}
+          onChange={(folio) =>
+            patch({
+              sections: (block.sections ?? []).map((s, n) => (n === i ? { ...s, folio } : s)),
+            })
+          }
+        />
+      ))}
     </>
   )
 }
 
-// ---------------------------------------------------------------------------
-// Images
-// ---------------------------------------------------------------------------
-
+/** Height as a multiple of the frame's own width. */
 const ASPECTS = [
-  { value: '1.08', label: 'Square-ish' },
+  { value: '0.62', label: 'Wide' },
+  { value: '0.75', label: 'Landscape' },
+  { value: '1', label: 'Square' },
+  { value: '1.08', label: 'Portrait' },
   { value: '1.35', label: 'Tall' },
   { value: '1.48', label: 'Taller' },
 ]
@@ -523,13 +374,6 @@ export function FigureEditor({
         onChange={(imageRef) => patch({ imageRef })}
         focus={block.focus}
         onFocusChange={(focus) => patch({ focus })}
-      />
-      <LocalizedField
-        label="Caption"
-        value={block.caption}
-        onChange={(caption) => patch({ caption })}
-        multiline
-        rows={2}
       />
       <Choice
         label="Shape"
@@ -580,21 +424,6 @@ export function CoverEditor({
 }) {
   return (
     <>
-      <LocalizedField
-        label="Title"
-        value={block.title}
-        onChange={(title) => patch({ title })}
-        multiline
-        rows={2}
-        hint="Each line is set on its own, fitted across the spread. Press Enter to break it."
-      />
-      <LocalizedField
-        label="Subtitle"
-        value={block.subtitle}
-        onChange={(subtitle) => patch({ subtitle })}
-        multiline
-        rows={2}
-      />
       <ImageField
         label="Cut-out"
         value={block.imageRef}

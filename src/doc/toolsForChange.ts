@@ -1,6 +1,12 @@
 import type { Block, BlockSeed } from './blocks'
 import { figmaImage } from './figmaImages'
+import { phraseMarks } from './marks'
 import type { Deck, Leaf } from './types'
+
+/** The exec-summary statement, shared by the template and the reference file. */
+const STATEMENT =
+  'Le HUB members spoke with 21 organizers from 16 organizations across 6 provinces.'
+
 
 /**
  * *Tools for Change*, transcribed.
@@ -117,6 +123,15 @@ const leaves: Leaf[] = [
     bodySize: 'xs',
     chapter: 'Table of contents',
     templateId: 'contents',
+    // Hand-authored `tocEntry` rows, deliberately, where the *template* now
+    // seeds a single self-filling `contents` block.
+    //
+    // This file is a transcription of a printed page, and the printed page's
+    // contents is editorial content that the leaves do not encode: it lists
+    // chapters this eleven-spread extract never reaches ("Conclusion", page 44)
+    // and sections that are real divisions of the report rather than of any
+    // leaf here. Deriving it would produce a shorter, different, and — as a
+    // transcription — wrong page.
     blocks: [
       b({ kind: 'tocEntry', label: 'Executive summary', folio: 6 }),
       b({ kind: 'tocEntry', label: 'Introduction', folio: 12 }),
@@ -205,8 +220,8 @@ const leaves: Leaf[] = [
     blocks: [
       b({
         kind: 'statement',
-        text: 'Le HUB members spoke with 21 organizers from 16 organizations across 6 provinces.',
-        highlights: ['21 organizers', '16 organizations', '6 provinces.'],
+        text: STATEMENT,
+        marks: phraseMarks(STATEMENT, ['21 organizers', '16 organizations', '6 provinces.']),
       }),
       b({ kind: 'figure', imageRef: figmaImage('globe'), aspect: 1.082, panel: 'pink', inset: 25 }),
       b({

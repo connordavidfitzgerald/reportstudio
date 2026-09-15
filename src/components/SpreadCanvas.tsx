@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { PAGE_H, PAGE_W, SPREAD_W } from '../config/brand'
+import { CONTENT_BOTTOM, PAGE_H, PAGE_W, RUNNING_HEAD_Y, SPREAD_W } from '../config/brand'
 import { useImageCache } from '../doc/imageCache'
 import type { Block } from '../doc/blocks'
 import { BLOCK_LABELS } from '../doc/defaults'
@@ -12,9 +12,16 @@ import { useDismiss } from '../hooks/useDismiss'
 import { useFontsReady } from '../hooks/useFontsReady'
 import { useRenderAssets } from '../hooks/useRenderAssets'
 import { useDeck } from '../store/useDeck'
+import { useUi } from '../store/useUi'
 import { InlineEditor } from './InlineEditor'
+import { fieldText } from '../doc/fieldValue'
+import { offsetFromPoint, wordAt } from './canvas/textOverlay'
 import { TextToolbar } from './canvas/TextToolbar'
+import { GridGuides } from './canvas/GridGuides'
+import { pageWidthPt, useBlockDrag, type Placement } from './canvas/useBlockDrag'
 import { BlockEditor } from './blocks'
+import { ComponentList } from './panel/ComponentList'
+import { hasBlockSettings } from './blocks/settings'
 
 /**
  * The spread view.
@@ -53,10 +60,16 @@ import { BlockEditor } from './blocks'
  * thing they were already looking at.
  *
  * Those rects become an overlay of hit targets, expressed as percentages of the
- * backing store so they survive every resize without being recomputed. This
- * adds *no* positional state to the document: you still cannot drag anything,
- * and a block still has no coordinates. It only makes the existing model
- * pointable.
+ * backing store so they survive every resize without being recomputed.
+ *
+ * ## Dragging still adds no coordinates
+ *
+ * Blocks *can* now be dragged, and this remains true: a vertical drag resolves
+ * to an index in `leaf.blocks` and a horizontal one to the `col`/`span` the
+ * block has always had. Nothing is written to the document that was not already
+ * expressible in it, and the compositor still decides every vertical position.
+ * See `canvas/useBlockDrag.ts` for the gesture, which lives entirely outside
+ * `useDeck` so that one drag is one undo.
  */
 
 interface LeafCanvasProps {
@@ -77,87 +90,73 @@ interface LeafCanvasProps {
 }
 
 /**
- * The controls that appear on the selected block, over the page.
+ * The one control on a selected block.
  *
- * The `⋯` is the escape hatch for everything that cannot be typed into the page
- * itself — a bar's value, a contents folio, which image a figure holds, where
- * its focal point is. Those fields deliberately have no text region (see
- * `InlineEditor`), so "edit on the canvas" has to mean *next to* the block for
- * them rather than *in* it.
+ * ## What was here before
+ *
+ * A pill of five round buttons floating above every selected component: move
+ * up, move down, duplicate, a `⋯` for the fields that weren't typeable, and
+ * remove. It was the busiest thing on the page and it sat, by construction,
+ * directly over the words you were trying to read.
+ *
+ * Four of the five are gone rather than moved:
+ *
+ *   ↑ ↓   are a drag now, which is the gesture people reach for first anyway.
+ *         ⌘⌥↑ and ⌘⌥↓ do it from the keyboard.
+ *   ⧉     is ⌘D.
+ *   ×     is Backspace, which `App.tsx` already handled — the button was
+ *         duplicating a key that worked.
+ *
+ * What is left is the one thing with nowhere else to go: the settings a
+ * component has that are not words on the page. And it only appears on the
+ * components that *have* any — `hasBlockSettings` — so a paragraph is now
+ * selected with no chrome on it at all.
  */
-function BlockTools({ block, index, count }: { block: Block; index: number; count: number }) {
-  const moveBlock = useDeck((s) => s.moveBlock)
-  const duplicateBlock = useDeck((s) => s.duplicateBlock)
-  const removeBlock = useDeck((s) => s.removeBlock)
-  const [fields, setFields] = useState(false)
-  const panel = useRef<HTMLDivElement>(null)
-  const id = block.id
-
-  const btn =
-    'flex h-6 w-6 items-center justify-center rounded-full text-[11px] leading-none text-ink ' +
-    'transition hover:bg-ink hover:text-card disabled:opacity-25 disabled:hover:bg-transparent ' +
-    'disabled:hover:text-ink'
+function BlockSettings({ block }: { block: Block }) {
+  const [open, setOpen] = useState(false)
+  const anchor = useRef<HTMLDivElement>(null)
 
   return (
-    <div ref={panel} onClick={(e) => e.stopPropagation()} className="pointer-events-auto relative">
-      <div className="flex items-center rounded-full bg-card px-1 py-1">
-        <button
-          type="button"
-          title="Move up"
-          disabled={index === 0}
-          onClick={() => moveBlock(id, -1)}
-          className={btn}
-        >
-          ↑
-        </button>
-        <button
-          type="button"
-          title="Move down"
-          disabled={index === count - 1}
-          onClick={() => moveBlock(id, 1)}
-          className={btn}
-        >
-          ↓
-        </button>
-        <button type="button" title="Duplicate" onClick={() => duplicateBlock(id)} className={btn}>
-          ⧉
-        </button>
-        <button
-          type="button"
-          title="Fields that aren't typed on the page"
-          onClick={() => setFields((f) => !f)}
-          className={btn}
-        >
-          ⋯
-        </button>
-        <button type="button" title="Remove" onClick={() => removeBlock(id)} className={btn}>
-          ×
-        </button>
-      </div>
+    <div ref={anchor} onClick={(e) => e.stopPropagation()} className="pointer-events-auto relative">
+      <button
+        type="button"
+        title={`${BLOCK_LABELS[block.kind]} settings`}
+        aria-label={`${BLOCK_LABELS[block.kind]} settings`}
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className={`flex h-6 w-6 items-center justify-center rounded-full transition
+          ${open ? 'bg-select text-white' : 'bg-select/90 text-white hover:bg-select'}`}
+      >
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden>
+          <circle cx="6.5" cy="6.5" r="2" stroke="currentColor" strokeWidth="1.3" />
+          <path
+            d="M6.5 1v1.6M6.5 10.4V12M1 6.5h1.6M10.4 6.5H12M2.6 2.6l1.1 1.1M9.3 9.3l1.1 1.1M10.4 2.6L9.3 3.7M3.7 9.3l-1.1 1.1"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            strokeLinecap="round"
+          />
+        </svg>
+      </button>
 
-      {fields && (
-        <BlockFields boundary={panel} block={block} onClose={() => setFields(false)} />
-      )}
+      {open && <BlockFields boundary={anchor} block={block} onClose={() => setOpen(false)} />}
     </div>
   )
 }
 
-/** The per-component fields, in a card anchored to the block. */
+/** The per-component settings, in a card anchored to the block's own corner. */
 function BlockFields({
   boundary,
   block,
   onClose,
 }: {
-  /** The whole tool row, so pressing ⋯ again closes rather than reopens. */
+  /** The control too, so pressing it again closes rather than reopens. */
   boundary: React.RefObject<HTMLDivElement | null>
   block: Block
   onClose: () => void
 }) {
   useDismiss(boundary, onClose)
   return (
-    <div
-      className="absolute left-0 top-full z-40 mt-1.5 flex w-64 flex-col gap-2.5 rounded-card bg-card p-4"
-    >
+    <div className="absolute right-0 top-full z-40 mt-1.5 flex w-64 flex-col gap-2.5 rounded-card bg-card p-4">
       <div className="flex items-center justify-between">
         <span className="text-2xs leading-none text-dim">{BLOCK_LABELS[block.kind]}</span>
         <button
@@ -170,6 +169,112 @@ function BlockFields({
       </div>
       <BlockEditor block={block} />
     </div>
+  )
+}
+
+/**
+ * A preview of the block at the position it would take.
+ *
+ * Its size comes from the geometry the source page registered, so the ghost is
+ * the block's real width and height rather than a guess — which matters because
+ * the whole question a vertical drag now answers is "does it fit there".
+ */
+function DropGhost({
+  target,
+  blockId,
+  width,
+  height,
+}: {
+  target: Placement
+  blockId: string
+  width: number
+  height: number
+}) {
+  const geom = useBlockDrag((s) => s.geom)
+  const pct = (v: number, of: number) => `${(v / of) * 100}%`
+
+  const source = Object.values(geom)
+    .flatMap((g) => g.placed)
+    .find((p) => p.block.id === blockId)
+  if (!source) return null
+
+  return (
+    <div
+      style={{
+        left: pct(source.rect.x, width),
+        top: pct(target.topPx, height),
+        width: pct(source.rect.w, width),
+        height: pct(Math.max(source.rect.h, height * 0.004), height),
+      }}
+      className="pointer-events-none absolute z-20 border border-dashed border-select bg-select/10"
+    />
+  )
+}
+
+/**
+ * The two grips that set a block's width, on the column lines.
+ *
+ * The Width/Position menu still exists and still names the four runs the design
+ * actually uses — "Inset", "Outer column" — because those are editorial ideas
+ * with names, not just geometry. These are for the run that has no name: you
+ * pull the edge and it stops on column lines, so the result is always on the
+ * grid whether or not you were thinking about the grid.
+ */
+function ColumnHandles({
+  block,
+  rect,
+  width,
+  height,
+  leafIndex,
+  onBegin,
+}: {
+  block: Block
+  rect: { x: number; y: number; w: number; h: number }
+  width: number
+  height: number
+  leafIndex: number
+  onBegin: ReturnType<typeof useBlockDrag.getState>['begin']
+}) {
+  const pct = (v: number, of: number) => `${(v / of) * 100}%`
+  const col0 = block.col ?? 0
+  const span0 = block.span ?? 9 - col0
+
+  const grip = (edge: 'left' | 'right') => (
+    <button
+      key={edge}
+      type="button"
+      title={edge === 'left' ? 'Drag to the column it should start on' : 'Drag to the column it should end on'}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        e.stopPropagation()
+        onBegin({
+          blockId: block.id,
+          fromLeaf: leafIndex,
+          mode: 'resize',
+          edge,
+          col0,
+          span0,
+          startX: e.clientX,
+          startY: e.clientY,
+          // A resize never moves the block vertically, so this is unused.
+          grabDY: 0,
+        })
+      }}
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        left: pct(edge === 'left' ? rect.x : rect.x + rect.w, width),
+        top: pct(rect.y + rect.h / 2, height),
+      }}
+      className="pointer-events-auto absolute h-4 w-1.5 -translate-x-1/2 -translate-y-1/2
+        cursor-ew-resize rounded-full bg-select"
+    />
+  )
+
+  return (
+    <>
+      {grip('left')}
+      {grip('right')}
+    </>
   )
 }
 
@@ -188,6 +293,7 @@ function HitLayer({
   scale,
   leafIndex,
   active,
+  overflowFrom,
 }: {
   placed: PlacedBlock[]
   /** Every run of words on this page, as the painter placed it. */
@@ -200,8 +306,11 @@ function HitLayer({
   leafIndex: number
   /** False for the facing page — only the page being edited takes clicks. */
   active: boolean
+  /** Index of the first block that runs past the foot of the page, if any. */
+  overflowFrom: number | null
 }) {
   const selectedBlock = useDeck((s) => s.selectedBlock)
+  const lang = useDeck((s) => s.deck.lang)
   const insertAt = useDeck((s) => s.insertAt)
   const selectBlock = useDeck((s) => s.selectBlock)
   const selectLeaf = useDeck((s) => s.selectLeaf)
@@ -213,6 +322,35 @@ function HitLayer({
   const caret = useDeck((s) => s.caret)
   const setCaret = useDeck((s) => s.setCaret)
   const [hover, setHover] = useState<string | null>(null)
+  const editRequest = useDeck((s) => s.editRequest)
+  const requestEdit = useDeck((s) => s.requestEdit)
+  const begin = useBlockDrag((s) => s.begin)
+  const consumeSuppress = useBlockDrag((s) => s.consumeSuppress)
+  const drag = useBlockDrag((s) => s.drag)
+
+  // Enter on a selected component asks for a caret in it, and this is where
+  // the ask becomes an answer: the block's first painted region. It runs after
+  // paint, so a block that has just been added is typeable on the keystroke
+  // rather than on the one after.
+  useEffect(() => {
+    if (!active || !editRequest) return
+    const region = regions.find((r) => r.blockId === editRequest)
+    if (!region) return
+    // Return on a selected component takes the whole field, the way Return on a
+    // selected text object does in a slide editor: there was no pointer to say
+    // where in the words the caret should go, and somebody who pressed a key to
+    // start typing usually means to replace what is there.
+    const block = placed.find((p) => p.block.id === editRequest)?.block
+    const text = block ? fieldText(block, region.path, lang) : ''
+    setCaret({
+      leafIndex,
+      blockId: editRequest,
+      path: region.path.join('.'),
+      from: 0,
+      to: text.length,
+    })
+    requestEdit(null)
+  }, [active, editRequest, regions, placed, lang, leafIndex, setCaret, requestEdit])
 
   if (!width || !height) return null
   const pct = (v: number, of: number) => `${(v / of) * 100}%`
@@ -247,10 +385,41 @@ function HitLayer({
     }
   }
 
+  /**
+   * Put a caret in the words that were clicked — in the field, and at the
+   * character.
+   *
+   * The field was always right; the character never was. A click anywhere in a
+   * paragraph opened the editor with the caret at the *end* of it, so the first
+   * thing you typed after clicking on the word you meant to fix appeared
+   * somewhere else entirely. Nothing about a canvas can answer "which
+   * character is under this point", so {@link offsetFromPoint} lays the same
+   * string out in a throwaway element and asks the browser.
+   */
   const startEditing = (blockId: string, e: React.MouseEvent) => {
     const { x, y } = pointOn(e)
     const region = regionAt(blockId, x, y)
-    if (region) setCaret({ leafIndex, blockId, path: region.path.join('.'), from: 0, to: 0 })
+    if (!region) return
+    const block = placed.find((p) => p.block.id === blockId)?.block
+    const host = (e.currentTarget as HTMLElement).closest('[data-leaf]') as HTMLElement | null
+    const text = block ? fieldText(block, region.path, lang) : ''
+    const at =
+      host && text
+        ? offsetFromPoint({
+            host,
+            region,
+            scale,
+            canvas: { w: width, h: height },
+            text,
+            clientX: e.clientX,
+            clientY: e.clientY,
+          })
+        : text.length
+    // A double-click takes the word, the way it does in any text field. The
+    // gesture arrives here as the second click of the pair — `e.detail` is what
+    // says which click it is — so there is no separate handler to keep in step.
+    const { from, to } = e.detail >= 2 ? wordAt(text, at) : { from: at, to: at }
+    setCaret({ leafIndex, blockId, path: region.path.join('.'), from, to })
   }
 
   /**
@@ -279,6 +448,8 @@ function HitLayer({
         const isHover = block.id === hover
         const typeable = regions.some((r) => r.blockId === block.id)
         const isEditing = editingRegion?.blockId === block.id
+        const isDragging = drag?.blockId === block.id && drag.mode !== 'pending'
+        const spilt = overflowFrom !== null && i >= overflowFrom
         return (
           <div key={block.id}>
             <button
@@ -286,6 +457,24 @@ function HitLayer({
               title={typeable ? `${BLOCK_LABELS[block.kind]} — click again to type` : BLOCK_LABELS[block.kind]}
               onMouseEnter={() => setHover(block.id)}
               onMouseLeave={() => setHover((h) => (h === block.id ? null : h))}
+              // A press is only a drag once it has travelled far enough to mean
+              // one — until then it is still the click it started as. The
+              // threshold lives in the store; see `useBlockDrag`.
+              onPointerDown={(e) => {
+                if (e.button !== 0) return
+                // Where on the block it was picked up, so it tracks the pointer
+                // from there instead of snapping its own top to the cursor.
+                const box = e.currentTarget.getBoundingClientRect()
+                begin({
+                  blockId: block.id,
+                  fromLeaf: leafIndex,
+                  col0: block.col ?? 0,
+                  span0: block.span ?? 9 - (block.col ?? 0),
+                  startX: e.clientX,
+                  startY: e.clientY,
+                  grabDY: e.clientY - box.top,
+                })
+              }}
               onDoubleClick={(e) => {
                 e.stopPropagation()
                 focusHere(block.id)
@@ -293,6 +482,9 @@ function HitLayer({
               }}
               onClick={(e) => {
                 e.stopPropagation()
+                // The click a finished drag leaves behind would otherwise
+                // deselect the block that was just dragged.
+                if (consumeSuppress()) return
                 // Coming from the facing page, the click is spent arriving:
                 // the page and the component are now selected, and the next
                 // click puts the caret in — the same two-step it takes on a
@@ -311,32 +503,51 @@ function HitLayer({
                 height: pct(hitH(rect.h, height), height),
               }}
               className={`pointer-events-auto absolute cursor-pointer transition-[outline-color]
+                ${isDragging ? 'opacity-40' : ''}
                 ${
                   isEditing
                     ? // The caret's own outline is the strong one while typing.
                       // A component holding several fields still shows where it
                       // ends, but quietly, so the two don't compete.
-                      'outline outline-1 outline-[#FF669E]/30'
+                      'outline outline-1 outline-select/30'
                     : isSelected
-                      ? 'outline outline-2 outline-[#FF669E]'
-                      : isHover
-                        ? 'outline outline-1 outline-black/40'
-                        : 'outline outline-1 outline-transparent'
+                      ? 'outline outline-2 outline-select'
+                      : // Past the foot of the page. Shown under hover and
+                        // selection, which are about what you are doing; this
+                        // is about what is wrong, and it is still wrong while
+                        // you are doing something else.
+                        spilt
+                        ? 'outline outline-1 outline-dashed outline-danger'
+                        : isHover
+                          ? 'outline outline-1 outline-black/40'
+                          : 'outline outline-1 outline-transparent'
                 }`}
             />
 
-            {isSelected && (
+            {isSelected && active && (
+              <ColumnHandles
+                block={block}
+                rect={rect}
+                width={width}
+                height={height}
+                leafIndex={leafIndex}
+                onBegin={begin}
+              />
+            )}
+
+            {/* The settings control, on the block's top-right corner and only
+              * where there is anything behind it. Outside the block rather than
+              * over it, so it never covers the words it belongs to. */}
+            {isSelected && active && hasBlockSettings(block.kind) && (
               <div
                 style={{
-                  left: pct(rect.x, width),
+                  left: pct(rect.x + rect.w, width),
                   top: pct(rect.y, height),
-                  // Sit the toolbar just above the block, or just inside it when
-                  // the block starts at the very top of the page.
-                  transform: rect.y / height < 0.05 ? 'translateY(2px)' : 'translateY(-28px)',
+                  transform: rect.y / height < 0.04 ? 'translate(-4px, 4px)' : 'translate(-4px, -28px)',
                 }}
                 className="pointer-events-none absolute"
               >
-                <BlockTools block={block} index={i} count={placed.length} />
+                <BlockSettings block={block} />
               </div>
             )}
 
@@ -367,6 +578,15 @@ function HitLayer({
           }}
           enabled={active}
         />
+      )}
+
+      {/* Where the block would land, drawn as the block. A hairline between two
+        * components was the right preview when a drag could only reorder; now
+        * that it also decides how far down the page the block sits, the honest
+        * preview is its own outline at its own size. Drawn on whichever page the
+        * pointer is over, which may not be the one it started on. */}
+      {drag?.mode === 'reorder' && drag.target?.leafIndex === leafIndex && (
+        <DropGhost target={drag.target} blockId={drag.blockId} width={width} height={height} />
       )}
 
       {/* Last, so the caret sits above every hit target and insert strip. */}
@@ -403,28 +623,54 @@ function InsertHere({
   style: React.CSSProperties
   enabled: boolean
 }) {
+  const anchor = useRef<HTMLDivElement>(null)
   if (!enabled) return null
   return (
-    <button
-      type="button"
-      title="Add a component here"
-      onClick={(e) => {
-        e.stopPropagation()
-        onArm(armed ? null : at)
-      }}
-      style={{ ...style, transform: 'translateY(-6px)' }}
-      className="pointer-events-auto group absolute flex h-3 cursor-pointer items-center justify-center"
-    >
-      <span
-        className={`h-px w-full transition-colors ${armed ? 'bg-[#FF669E]' : 'bg-transparent group-hover:bg-[#FF669E]'}`}
-      />
-      <span
-        className={`absolute flex h-4 w-4 items-center justify-center border text-[10px] leading-none transition
-          ${armed ? 'border-[#FF669E] bg-[#FF669E] text-white' : 'border-transparent bg-transparent text-transparent group-hover:border-[#FF669E] group-hover:bg-white group-hover:text-[#FF669E]'}`}
+    <div ref={anchor} style={{ ...style, transform: 'translateY(-6px)' }} className="absolute">
+      <button
+        type="button"
+        title="Add a component here"
+        onClick={(e) => {
+          e.stopPropagation()
+          onArm(armed ? null : at)
+        }}
+        className="pointer-events-auto group relative flex h-3 w-full cursor-pointer items-center justify-center"
       >
-        +
-      </span>
-    </button>
+        <span
+          className={`h-px w-full transition-colors ${armed ? 'bg-select' : 'bg-transparent group-hover:bg-select'}`}
+        />
+        <span
+          className={`absolute flex h-4 w-4 items-center justify-center border text-[10px] leading-none transition
+            ${armed ? 'border-select bg-select text-white' : 'border-transparent bg-transparent text-transparent group-hover:border-select group-hover:bg-white group-hover:text-select'}`}
+        >
+          +
+        </span>
+      </button>
+
+      {/* The palette, here, rather than a slot armed on the page and a list to
+        * go and find in the panel. */}
+      {armed && <InsertPalette boundary={anchor} onClose={() => onArm(null)} />}
+    </div>
+  )
+}
+
+/** The component palette, at the place on the page it will insert into. */
+function InsertPalette({
+  boundary,
+  onClose,
+}: {
+  boundary: React.RefObject<HTMLDivElement | null>
+  onClose: () => void
+}) {
+  useDismiss(boundary, onClose)
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className="pointer-events-auto absolute left-1/2 top-3 z-40 w-60 -translate-x-1/2
+        rounded-card bg-card p-4"
+    >
+      <ComponentList onPick={onClose} />
+    </div>
   )
 }
 
@@ -442,9 +688,21 @@ function LeafCanvas({
   dpr,
 }: LeafCanvasProps) {
   const ref = useRef<HTMLCanvasElement>(null)
+  const leafEl = useRef<HTMLDivElement>(null)
   const imageVersion = useImageCache()
   const [placed, setPlaced] = useState<PlacedBlock[]>([])
+  // Where the flow starts on this page, which is not the first block's top once
+  // anything has been dragged. The drag resolver needs it to know how far up a
+  // block may be dropped.
+  const [origin, setOrigin] = useState(0)
   const [regions, setRegions] = useState<TextRegion[]>([])
+  const addBlock = useDeck((s) => s.addBlock)
+  const requestEdit = useDeck((s) => s.requestEdit)
+  const register = useBlockDrag((s) => s.register)
+  const forget = useBlockDrag((s) => s.forget)
+  const drag = useBlockDrag((s) => s.drag)
+  const gridOpen = useUi((s) => s.gridOpen)
+  const pageWpt = pageWidthPt(leaf.full)
 
   useEffect(() => {
     const canvas = ref.current
@@ -457,8 +715,38 @@ function LeafCanvas({
     const result = renderLeaf(ctx, leaf, deck, devicePx, assets, { index, regions: true })
     canvas.dataset.overflow = result.overflow ? 'true' : 'false'
     setPlaced(result.placed)
+    setOrigin(result.origin)
     setRegions(result.regions)
   }, [leaf, deck, assets, ready, index, imageVersion, devicePx, devicePxH])
+
+  // Publish what was painted, so a drag that ends over this page can work out
+  // which boundary it ended on. Registered after every repaint rather than once
+  // on mount: the rects are what changed.
+  useEffect(() => {
+    const el = leafEl.current
+    if (!el || !devicePx) return
+    register(index, { placed, width: devicePx, height: devicePxH, pageWpt, origin, el })
+    return () => forget(index)
+  }, [register, forget, index, placed, origin, devicePx, devicePxH, pageWpt])
+
+  /**
+   * The first block that falls past the page's foot, if any.
+   *
+   * The overflow was reported only in the side panel, as a sentence naming the
+   * component. It is a fact about a *place on the page*, so it is also shown
+   * there — the blocks that have run off get a warning outline, and you can see
+   * which ones without reading anything. The panel note stays, because it
+   * carries the two fixes (show it, set the text smaller) and a marker cannot.
+   */
+  const overflowFrom = (() => {
+    if (!placed.length || !devicePxH) return null
+    // A bare plate has no foot rule to respect: its band and credit run to the
+    // trim. Same rule as `paintBlocks`.
+    const bottomPt = leaf.bare ? PAGE_H - RUNNING_HEAD_Y : CONTENT_BOTTOM
+    const bottom = devicePxH * (bottomPt / PAGE_H)
+    const at = placed.findIndex((p) => p.rect.y + p.rect.h > bottom + 0.5)
+    return at < 0 ? null : at
+  })()
 
   // The CSS box is the backing store divided back down, never an independent
   // measurement — see the header. Both axes come from the two integers the
@@ -466,16 +754,39 @@ function LeafCanvas({
   const cssW = devicePx / dpr
   const cssH = devicePxH / dpr
 
+  // The guides show when they are switched on, and *also* for the length of a
+  // drag. That second half is what makes the grid discoverable: you find out
+  // the page has columns at the exact moment you are trying to put something in
+  // one, without having had to know there was a setting.
+  const guides = gridOpen || !!drag
+
   return (
     <div
+      ref={leafEl}
       onClick={onSelect}
+      // Double-clicking the empty part of a page adds a paragraph and puts the
+      // caret in it — the gesture every page editor has, and which did nothing
+      // here. Only on the page itself: a double-click that landed on a block
+      // reached that block's own handler and never gets this far.
+      onDoubleClick={(e) => {
+        if (!selected || e.target !== e.currentTarget) return
+        addBlock('para')
+        requestEdit(useDeck.getState().selectedBlock)
+      }}
       data-leaf
       style={{ width: `${cssW}px`, height: `${cssH}px` }}
       className={`relative block shrink-0 outline-offset-2 ${
-        selected ? 'outline outline-2 outline-[#FF669E]' : 'outline outline-1 outline-black/20'
+        selected ? 'outline outline-2 outline-select' : 'outline outline-1 outline-black/20'
       }`}
     >
       <canvas ref={ref} style={{ width: `${cssW}px`, height: `${cssH}px` }} className="block" />
+      {guides && (
+        <GridGuides
+          pageWpt={pageWpt}
+          highlight={drag?.fromLeaf === index ? drag.band : null}
+          snap={drag?.target?.leafIndex === index ? drag.target.top : null}
+        />
+      )}
       <HitLayer
         placed={placed}
         regions={regions}
@@ -484,6 +795,7 @@ function LeafCanvas({
         scale={editorScale}
         leafIndex={index}
         active={selected}
+        overflowFrom={overflowFrom}
       />
     </div>
   )
@@ -540,6 +852,58 @@ function PageTurn() {
   )
 }
 
+/**
+ * Drive a drag from the window, and write the document once when it lands.
+ *
+ * On the window rather than on the block, because a drag is allowed to leave
+ * the page it started on — pointer capture would keep the events coming, but
+ * only to the element that was pressed, and the gesture needs to know about the
+ * *facing* page too. The leaves publish their geometry into the drag store for
+ * exactly this reason.
+ */
+function useDragGesture() {
+  const move = useBlockDrag((s) => s.move)
+  const end = useBlockDrag((s) => s.end)
+  const cancel = useBlockDrag((s) => s.cancel)
+  const active = useBlockDrag((s) => s.drag !== null)
+  const updateBlock = useDeck((s) => s.updateBlock)
+  const moveBlockTo = useDeck((s) => s.moveBlockTo)
+
+  useEffect(() => {
+    if (!active) return
+    const onMove = (e: PointerEvent) => move(e.clientX, e.clientY)
+    const onUp = () => {
+      const drag = end()
+      if (!drag) return
+      // One write, on drop — see the note in `useBlockDrag`. A drag that
+      // resolved to nothing (straight back where it started, or off the page
+      // entirely) writes nothing at all rather than committing a no-op that
+      // would still cost an undo step.
+      if (drag.mode === 'reorder' && drag.target) {
+        const { leafIndex, at, top, pins } = drag.target
+        moveBlockTo(drag.blockId, leafIndex, at, { top, pins })
+      } else if (drag.band && (drag.band.col !== drag.col0 || drag.band.span !== drag.span0)) {
+        updateBlock(drag.blockId, { col: drag.band.col, span: drag.band.span })
+      }
+    }
+    // Escape puts it back. Nothing has been written yet, so there is nothing to
+    // undo — the gesture simply stops meaning anything.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') cancel()
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', cancel)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', cancel)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [active, move, end, cancel, updateBlock, moveBlockTo])
+}
+
 export function SpreadCanvas() {
   const deck = useDeck((s) => s.deck)
   const leafIndex = useDeck((s) => s.leafIndex)
@@ -548,6 +912,7 @@ export function SpreadCanvas() {
   const ready = useFontsReady()
   const assets = useRenderAssets()
   const stage = useRef<HTMLDivElement>(null)
+  useDragGesture()
 
   const spreads = deckSpreads(deck)
   const spread = spreads.find((s) =>

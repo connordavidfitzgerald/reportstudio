@@ -1,5 +1,5 @@
 import type { Rect } from './types'
-import type { ImageRef } from '../doc/imageStore'
+import type { ImageRef } from '../doc/imageRef'
 import {
   BODY_INDENT,
   BODY_SIZE,
@@ -25,7 +25,7 @@ import {
 } from '../config/brand'
 import type { Block } from '../doc/blocks'
 import type { Deck, Leaf } from '../doc/types'
-import { runningHeadOf } from '../doc/types'
+import { deriveContents, runningHeadOf } from '../doc/types'
 import { t as resolve, type Lang } from '../doc/localized'
 import { markKey, marksAt, toSegments } from '../doc/marks'
 import {
@@ -123,9 +123,21 @@ export type FieldPath = (string | number)[]
  * answer can't drift: there is no second pass working out where the text
  * "probably" went.
  *
- * Fields holding numbers rather than words — a bar's value, a contents folio —
- * are deliberately absent. They are typed in the side panel, where they can be
- * validated as numbers.
+ * ## Numbers are regions too
+ *
+ * This used to say that fields holding numbers — a bar's value, a contents
+ * folio — were "deliberately absent", on the grounds that the side panel could
+ * validate them as numbers and a canvas could not.
+ *
+ * That was the wrong trade. The number on a bar chart is the *largest thing on
+ * the page*; being unable to touch it, and having to find a spinner in a panel
+ * to change the one figure the reader will actually look at, is precisely the
+ * kind of detour the panel keeps inventing for itself. Validation is a smaller
+ * problem than that, and `InlineEditor` solves it by holding the half-typed
+ * text locally and only committing a number when there is one.
+ *
+ * So numeric fields are marked, and carry {@link numeric} so the editor knows
+ * to take digits rather than words.
  */
 export interface TextRegion {
   blockId: string
@@ -134,6 +146,20 @@ export interface TextRegion {
   style: TextStyle
   /** First-line indent, in points — like every size in {@link TextStyle}. */
   indent: number
+  /** The field holds a number, not words. Typed as digits, stored as a number. */
+  numeric?: true
+  /**
+   * The painter wrapped this run, and will honour a newline in it.
+   *
+   * Absent on the fields that are drawn as exactly one line — a credit, a bar's
+   * label, a contents row — where the text is handed to `drawLines` already
+   * "wrapped" into the single line it is. Typing a newline into one of those
+   * put a break in the *editor* that the page had no way to draw, so the words
+   * stopped agreeing with the caret from that character on: the line you were
+   * typing on did not exist on the page. {@link InlineEditor} reads this to know
+   * whether Return means a line break or means "done".
+   */
+  multiline?: true
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +231,8 @@ function editableStyleFor(
     case 'para':
       return {
         style: bodyStyle(leaf, block.size ? { size: BODY_SIZE[block.size] } : {}),
-        indent: block.indent === false ? 0 : BODY_INDENT,
+        // Opt-in, not opt-out. See the note on `ParaBlock`.
+        indent: block.indent ? BODY_INDENT : 0,
       }
     case 'quote':
       return {
@@ -270,9 +297,17 @@ function mark(
   path: FieldPath,
   rect: Rect,
   style: TextStyle,
-  indent = 0,
+  opts: { indent?: number; numeric?: boolean; multiline?: boolean } = {},
 ): void {
-  env.collect?.({ blockId: block.id, path, rect, style, indent })
+  env.collect?.({
+    blockId: block.id,
+    path,
+    rect,
+    style,
+    indent: opts.indent ?? 0,
+    ...(opts.numeric ? { numeric: true } : {}),
+    ...(opts.multiline ? { multiline: true } : {}),
+  })
 }
 
 const text = (env: LeafEnv, t: Parameters<typeof resolve>[0]): string => resolve(t, env.lang)
@@ -398,26 +433,188 @@ function paintRun(
       // see is one nobody clicks.
       underline: seg.u || seg.href !== undefined,
       href: seg.href,
+      swash: seg.h,
+      // Highlighted words sit a step softer than their surroundings. On a
+      // statement the run is set at `strong` and the pink words at `body`,
+      // which is how the file has it — full-strength ink on a saturated bar
+      // reads as heavier than the words either side of it, not lighter.
+      alpha: seg.h ? 'body' : undefined,
     }))
     const lines = layoutInline(ctx, sheet, style, segments, box.w, { indent })
-    const { base } = inlineBaseline(ctx, sheet, style)
+    const { base, metrics } = inlineBaseline(ctx, sheet, style)
+    if (segments.some((seg) => seg.swash)) {
+      drawSwash(
+        ctx,
+        inlineSwashRects(sheet, style, lines, box, base, metrics),
+        swashFor(env.leaf.surface),
+      )
+    }
     h = drawInline(ctx, sheet, style, lines, box, base)
     if (env.collectLink) {
       for (const link of inlineLinkRects(sheet, style, lines, box)) env.collectLink(link)
     }
   }
-  mark(env, block, path, { ...box, h }, style, indentPt)
+  mark(env, block, path, { ...box, h }, style, { indent: indentPt, multiline: true })
   return h
 }
 
 /**
- * Which components accept bold, italic, underline and links.
+ * One chapter of a contents page: the chapter on a swash, its folio, its rows.
  *
- * The prose surface, and not the composed ones: a statement's words already
- * flow as segments carrying a swash, a contents row already sets its label and
- * folio differently on one line, and threading a second segment model through
- * those would be two systems deciding the same pixels. The toolbar reads this
- * so the controls are disabled rather than silently doing nothing.
+ * Shared by the two blocks that draw a contents — `tocEntry`, which is a row
+ * somebody placed and typed, and `contents`, which is every row derived from
+ * the document. They were one painter and a copy of it for about an hour; the
+ * copy is the reason this is a function.
+ *
+ * `paths` marks the text as editable fields. A derived row has no fields — the
+ * words belong to a page's chapter and section, not to this block — so it draws
+ * the same ink and offers no caret, which is what stops somebody typing into a
+ * contents page and losing it on the next repaint.
+ */
+function paintTocRow(
+  env: LeafEnv,
+  block: Block,
+  box: Rect,
+  row: {
+    label: string
+    folio: number | null
+    sections: { label: string; qualifier?: string; folio: number | null }[]
+    paths?: boolean
+  },
+): number {
+  const { ctx, sheet } = env
+  const chapter = styleFor(TYPE.tocChapter)
+  const folio = styleFor(TYPE.tocChapterFolio, { align: 'right' })
+  const swash = swashFor(env.leaf.surface)
+  let y = box.y
+
+  const lines = layoutInline(ctx, sheet, chapter, [{ text: row.label, swash: true, id: 'label' }], box.w)
+  const { base, metrics } = inlineBaseline(ctx, sheet, chapter)
+  drawSwash(ctx, inlineSwashRects(sheet, chapter, lines, box, base, metrics), swash)
+  const rowH = drawInline(ctx, sheet, chapter, lines, box, base)
+  if (row.paths) mark(env, block, ['label'], { ...box, h: rowH }, chapter, { multiline: true })
+  if (row.folio !== null) {
+    applyFont(ctx, sheet, folio)
+    drawLines(ctx, sheet, folio, [{ text: String(row.folio), opensPara: true }], { ...box, y })
+  }
+  y += rowH
+
+  row.sections.forEach((s, si) => {
+    y += sheet.pt(GAP.toc)
+    const style = styleFor(TYPE.tocSection)
+    const inset = sheet.pt(20)
+    const sub: Segment[] = [{ text: s.label, swash: true, id: 'label' }]
+    if (s.qualifier) {
+      sub.push({ text: ` ${s.qualifier}`, swash: true, size: TYPE.tocQualifier.size, id: 'qualifier' })
+    }
+    const subBox = { x: box.x + inset, y, w: box.w - inset, h: 0 }
+    const subLines = layoutInline(ctx, sheet, style, sub, subBox.w)
+    const { base: subBase, metrics: subMetrics } = inlineBaseline(ctx, sheet, style)
+    drawSwash(ctx, inlineSwashRects(sheet, style, subLines, subBox, subBase, subMetrics), swash)
+    const subH = drawInline(ctx, sheet, style, subLines, subBox, subBase)
+    // The sub-row folio sits just past the swash, not out at the margin.
+    if (s.folio !== null) {
+      const sf = styleFor(TYPE.tocSectionFolio)
+      applyFont(ctx, sheet, sf)
+      drawLines(ctx, sheet, sf, [{ text: String(s.folio), opensPara: true }], {
+        x: subBox.x + (subLines[0]?.width ?? 0) + sheet.pt(5),
+        y: y + sheet.pt(2),
+        w: sheet.pt(40),
+        h: 0,
+      })
+    }
+    if (row.paths) {
+      for (const key of ['label', 'qualifier'] as const) {
+        const at = segmentRect(sheet, style, subLines, subBox, key)
+        if (at) mark(env, block, ['sections', si, key], at, style, { multiline: true })
+      }
+    }
+    y += subH
+  })
+
+  return y - box.y
+}
+
+/**
+ * Share out a table's columns over the grid columns its block occupies.
+ *
+ * `TableBlock.widths` are shares rather than spans (see the note on the type),
+ * so this is where they become geometry — and it is the only place, which is
+ * what keeps a table on the grid however its block has been resized.
+ *
+ * Whole grid columns are allocated largest-remainder: each table column gets
+ * its share rounded down, and the leftovers go to the columns that were cut
+ * most by the rounding. Every column gets at least one, so a three-column table
+ * in a two-column block cannot allocate — and then, rather than drawing a table
+ * with a column of zero width, it falls back to dividing the box evenly and
+ * accepts being off the grid. A narrow table that is readable beats a correct
+ * one that is invisible.
+ */
+export function tableColumns(
+  block: Block & { kind: 'table' },
+  sheet: Sheet,
+  box: Rect,
+): { x: number; w: number }[] {
+  const n = block.widths.length
+  const span = block.span ?? sheet.cols - (block.col ?? 0)
+  const col0 = block.col ?? 0
+
+  if (n > span) {
+    const w = box.w / n
+    return Array.from({ length: n }, (_, i) => ({ x: box.x + i * w, w }))
+  }
+
+  const total = block.widths.reduce((a, b) => a + Math.max(0, b), 0) || n
+  const exact = block.widths.map((v) => (Math.max(0, v) / total) * span)
+
+  // Floor first, *without* a minimum. Flooring can only ever under-allocate, so
+  // there is always a remainder to hand out and never an overflow to claw back
+  // — which is what a `Math.max(1, …)` here would silently cause for a share of
+  // zero, by taking a column the ratio never gave it.
+  const counts = exact.map((v) => Math.floor(v))
+  let left = span - counts.reduce((a, b) => a + b, 0)
+  // Largest remainder: the column cut most by the floor is served first, so the
+  // widths stay as close to the ratio as whole columns allow.
+  while (left > 0) {
+    let best = 0
+    for (let i = 1; i < n; i += 1) {
+      if (exact[i] - counts[i] > exact[best] - counts[best]) best = i
+    }
+    counts[best] += 1
+    left -= 1
+  }
+
+  // Only now give every column its minimum, by taking from the widest. `n <= span`
+  // at this point, so there is always a column with more than one to take from.
+  for (let i = 0; i < n; i += 1) {
+    if (counts[i] > 0) continue
+    let widest = 0
+    for (let j = 1; j < n; j += 1) if (counts[j] > counts[widest]) widest = j
+    counts[widest] -= 1
+    counts[i] = 1
+  }
+
+  const out: { x: number; w: number }[] = []
+  let at = col0
+  for (const count of counts) {
+    out.push({ x: sheet.colX(at), w: sheet.colSpan(count) })
+    at += count
+  }
+  return out
+}
+
+/**
+ * Which components accept bold, italic, underline, highlight and links.
+ *
+ * The prose surface, and not the composed ones: a contents row sets its label
+ * and its folio differently on a single line, and threading a second segment
+ * model through that would be two systems deciding the same pixels. The toolbar
+ * reads this so the controls are disabled rather than silently doing nothing.
+ *
+ * A statement used to be excluded for the same reason — its words "already flow
+ * as segments carrying a swash". That was the argument for keeping two segment
+ * models, and the highlight mark collapses them into one: the swash is now what
+ * an `h` mark paints, on a statement exactly as anywhere else.
  */
 export const supportsMarks = (kind: Block['kind']): boolean =>
   kind === 'heading' ||
@@ -425,9 +622,11 @@ export const supportsMarks = (kind: Block['kind']): boolean =>
   kind === 'sectionHeading' ||
   kind === 'para' ||
   kind === 'quote' ||
+  kind === 'statement' ||
   kind === 'text' ||
   kind === 'defList' ||
-  kind === 'bulletList'
+  kind === 'bulletList' ||
+  kind === 'table'
 
 function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {}): number {
   const { ctx, sheet } = env
@@ -457,7 +656,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
         h += sheet.pt(GAP.tight)
         const attrBox = { ...box, y: box.y + h }
         const attrH = drawLines(ctx, sheet, attr, wrapText(ctx, `— ${text(env, block.attribution)}`, box.w, 0, attr), attrBox)
-        mark(env, block, ['attribution'], { ...attrBox, h: attrH }, attr)
+        mark(env, block, ['attribution'], { ...attrBox, h: attrH }, attr, { multiline: true })
         h += attrH
       }
       return h
@@ -472,7 +671,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       applyFont(ctx, sheet, style)
       const labelBox = { ...box, y: labelY }
       const labelH = drawLines(ctx, sheet, style, wrapText(ctx, text(env, block.text), box.w, 0, style), labelBox)
-      mark(env, block, ['text'], { ...labelBox, h: labelH }, style)
+      mark(env, block, ['text'], { ...labelBox, h: labelH }, style, { multiline: true })
       const h = sheet.pt(23.2)
       rule(env, box, box.y + h)
       return h + top
@@ -501,7 +700,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
         h: h - pad * 2,
       }
       drawLines(ctx, sheet, style, lines, textBox)
-      mark(env, block, ['text'], textBox, style)
+      mark(env, block, ['text'], textBox, style, { multiline: true })
       return h
     }
 
@@ -512,25 +711,16 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       return block.height === 'fill' ? (opts.fill ?? 0) : sheet.pt(block.height)
 
     case 'statement': {
-      const style = runStyle(env, block)
-      const raw = text(env, block.text)
-      const segs = splitHighlights(raw, block.highlights ?? [])
-      const lines = layoutInline(ctx, sheet, style, segs, box.w)
-      const { base, metrics } = inlineBaseline(ctx, sheet, style)
-      drawSwash(
-        ctx,
-        inlineSwashRects(sheet, style, lines, box, base, metrics),
-        swashFor(env.leaf.surface),
-      )
-      let h = drawInline(ctx, sheet, style, lines, box, base)
-      mark(env, block, ['text'], { ...box, h }, style)
+      // The pink words are `h` marks like any other highlight, so the whole
+      // block is just a run of text — see `supportsMarks` above.
+      let h = paintRun(env, block, ['text'], text(env, block.text), box, runStyle(env, block))
       if (block.note) {
         const note = styleFor(TYPE.statementNote)
         h += sheet.pt(GAP.block)
         applyFont(ctx, sheet, note)
         const noteBox = { ...box, y: box.y + h }
         const noteH = drawLines(ctx, sheet, note, wrapText(ctx, text(env, block.note), box.w, 0, note), noteBox)
-        mark(env, block, ['note'], { ...noteBox, h: noteH }, note)
+        mark(env, block, ['note'], { ...noteBox, h: noteH }, note, { multiline: true })
         h += noteH
       }
       return h
@@ -542,7 +732,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       const lines = wrapText(ctx, text(env, block.text), box.w, 0, style)
       drawSwash(ctx, swashRects(ctx, sheet, style, lines, box), swashFor(env.leaf.surface))
       const h = drawLines(ctx, sheet, style, lines, box)
-      mark(env, block, ['text'], { ...box, h }, style)
+      mark(env, block, ['text'], { ...box, h }, style, { multiline: true })
       return h
     }
 
@@ -611,7 +801,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
         y += drawInline(ctx, sheet, style, lines, rowBox, base)
         for (const [id, key] of [['label', 'label'], ['note', 'note']] as const) {
           const at = segmentRect(sheet, style, lines, rowBox, id)
-          if (at) mark(env, block, ['items', i, key], at, style)
+          if (at) mark(env, block, ['items', i, key], at, style, { multiline: true })
         }
         y += sheet.pt(GAP.tight)
       })
@@ -639,6 +829,45 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
         mark(env, block, ['rows', i, 'value'], { ...box, y: y + advance, h: advance }, style)
         y += rowH + advance * 0.5
       })
+      return y - box.y
+    }
+
+    case 'table': {
+      const head = styleFor(TYPE.subhead)
+      const cell = styleFor(TYPE.defBody)
+      const cols = tableColumns(block, sheet, box)
+      const pad = sheet.pt(GAP.tight)
+      let y = box.y
+
+      block.rows.forEach((row, r) => {
+        const isHead = r === 0 && !!block.header
+        const style = isHead ? head : cell
+
+        // Every cell is wrapped before any is drawn, because the row is as tall
+        // as its tallest cell and the rule under it has to clear all of them.
+        applyFont(ctx, sheet, style)
+        const wrapped = cols.map((c, i) =>
+          wrapText(ctx, text(env, row[i] ?? ''), c.w, 0, style),
+        )
+        const rowH = Math.max(
+          lineAdvance(sheet, style),
+          ...wrapped.map((lines) => lines.length * lineAdvance(sheet, style)),
+        )
+
+        cols.forEach((c, i) => {
+          applyFont(ctx, sheet, style)
+          const cellBox = { x: c.x, y: y + pad, w: c.w, h: 0 }
+          drawLines(ctx, sheet, style, wrapped[i], cellBox)
+          mark(env, block, ['rows', r, i], { ...cellBox, h: rowH }, style, { multiline: true })
+        })
+
+        y += rowH + pad * 2
+        // A rule under every row but the last: the table is ruled between its
+        // rows, not boxed. A box would be a different design, and a heavier one
+        // than anything else on these pages.
+        if (r < block.rows.length - 1) y += rule(env, box, y)
+      })
+
       return y - box.y
     }
 
@@ -675,7 +904,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
         const capBox = { ...box, y: box.y + used }
         drawSwash(ctx, swashRects(ctx, sheet, style, lines, capBox), swashFor(env.leaf.surface))
         const capH = drawLines(ctx, sheet, style, lines, capBox)
-        mark(env, block, ['caption'], { ...capBox, h: capH }, style)
+        mark(env, block, ['caption'], { ...capBox, h: capH }, style, { multiline: true })
         used += capH
       }
       return used
@@ -705,18 +934,33 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
 
         const gx = box.x + barW + gutter
         const gw = Math.max(sheet.pt(60), box.x + box.w - gx)
-        const value = `${s.value}${block.unit ?? '%'}`
+        const digits = String(s.value)
+        const value = `${digits}${block.unit ?? '%'}`
         // Fitted, not set: the file has these at 71.2 and 74.4 on one plate,
         // sized to the digits rather than to a step.
         const size = fitSize(ctx, sheet, num, value, gw, TYPE.statNumber.size)
         const numStyle = { ...num, size }
+        const numY = y + sheet.pt(5.6)
         const numH = drawLines(ctx, sheet, numStyle, [{ text: value, opensPara: true }], {
           x: gx,
-          y: y + sheet.pt(5.6),
+          y: numY,
           w: gw,
           h: 0,
         })
-        let ly = y + sheet.pt(5.6) + numH
+        // The region covers the digits and *not* the unit. They are drawn as one
+        // run because they are set as one, but only the number is a field — put
+        // a caret across the whole thing and you could type over the `%`, which
+        // is not a value and has nowhere to be stored.
+        applyFont(ctx, sheet, numStyle)
+        mark(
+          env,
+          block,
+          ['series', i, 'value'],
+          { x: gx, y: numY, w: ctx.measureText(digits).width, h: numH },
+          numStyle,
+          { numeric: true },
+        )
+        let ly = numY + numH
         applyFont(ctx, sheet, label)
         const labelBox = { x: gx, y: ly, w: gw, h: 0 }
         const labelH = drawLines(ctx, sheet, label, [{ text: text(env, s.label), opensPara: true }], labelBox)
@@ -734,60 +978,32 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       return y - box.y
     }
 
-    case 'tocEntry': {
-      const chapter = styleFor(TYPE.tocChapter)
-      const folio = styleFor(TYPE.tocChapterFolio, { align: 'right' })
-      const swash = swashFor(env.leaf.surface)
+    case 'tocEntry':
+      // A hand-authored row. `contents` draws the same thing from the document.
+      return paintTocRow(env, block, box, {
+        label: text(env, block.label),
+        folio: block.folio,
+        sections: (block.sections ?? []).map((sec) => ({
+          label: text(env, sec.label),
+          qualifier: sec.qualifier === undefined ? undefined : text(env, sec.qualifier),
+          folio: sec.folio,
+        })),
+        paths: true,
+      })
+
+    case 'contents': {
+      // Every row, worked out from the leaves — see `deriveContents`. The block
+      // itself holds nothing, which is the point: a contents page that stores
+      // its own page numbers is a contents page that can be wrong.
       let y = box.y
-
-      const lines = layoutInline(
-        ctx,
-        sheet,
-        chapter,
-        [{ text: text(env, block.label), swash: true, id: 'label' }],
-        box.w,
-      )
-      const { base, metrics } = inlineBaseline(ctx, sheet, chapter)
-      drawSwash(ctx, inlineSwashRects(sheet, chapter, lines, box, base, metrics), swash)
-      const rowH = drawInline(ctx, sheet, chapter, lines, box, base)
-      mark(env, block, ['label'], { ...box, h: rowH }, chapter)
-      applyFont(ctx, sheet, folio)
-      drawLines(ctx, sheet, folio, [{ text: String(block.folio), opensPara: true }], { ...box, y })
-      y += rowH
-
-      ;(block.sections ?? []).forEach((s, si) => {
-        y += sheet.pt(GAP.toc)
-        const style = styleFor(TYPE.tocSection)
-        const inset = sheet.colX(0) - sheet.colX(0) + sheet.pt(20)
-        const sub: Segment[] = [{ text: text(env, s.label), swash: true, id: 'label' }]
-        if (s.qualifier) {
-          sub.push({
-            text: ` ${text(env, s.qualifier)}`,
-            swash: true,
-            size: TYPE.tocQualifier.size,
-            id: 'qualifier',
-          })
-        }
-        const subBox = { x: box.x + inset, y, w: box.w - inset, h: 0 }
-        const subLines = layoutInline(ctx, sheet, style, sub, subBox.w)
-        const { base: subBase, metrics: subMetrics } = inlineBaseline(ctx, sheet, style)
-        drawSwash(ctx, inlineSwashRects(sheet, style, subLines, subBox, subBase, subMetrics), swash)
-        const subH = drawInline(ctx, sheet, style, subLines, subBox, subBase)
-        // The sub-row folio sits just past the swash, not out at the margin.
-        const sf = styleFor(TYPE.tocSectionFolio)
-        applyFont(ctx, sheet, sf)
-        const swashW = subLines[0]?.width ?? 0
-        drawLines(ctx, sheet, sf, [{ text: String(s.folio), opensPara: true }], {
-          x: subBox.x + swashW + sheet.pt(5),
-          y: y + sheet.pt(2),
-          w: sheet.pt(40),
-          h: 0,
-        })
-        for (const [id, key] of [['label', 'label'], ['qualifier', 'qualifier']] as const) {
-          const at = segmentRect(sheet, style, subLines, subBox, id)
-          if (at) mark(env, block, ['sections', si, key], at, style)
-        }
-        y += subH
+      deriveContents(env.deck, env.lang).forEach((row, i) => {
+        if (i > 0) y += sheet.pt(GAP.toc)
+        y += paintTocRow(
+          env,
+          block,
+          { ...box, y },
+          { label: row.label, folio: row.folio, sections: row.sections },
+        )
       })
       return y - box.y
     }
@@ -824,7 +1040,9 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       drawLines(ctx, sheet, titleStyle, lines, titleBox)
       // The fitted size, not the nominal 272.8 — the caret has to sit on the
       // type as drawn, and the cover's title is sized to the spread.
-      mark(env, block, ['title'], { ...titleBox, h: lines.length * lineAdvance(sheet, titleStyle) }, titleStyle)
+      mark(env, block, ['title'], { ...titleBox, h: lines.length * lineAdvance(sheet, titleStyle) }, titleStyle, {
+        multiline: true,
+      })
 
       // The cut-out sits *over* the title — the type is background — and runs
       // off the foot of the page. Drawn at its natural aspect and clipped by
@@ -853,7 +1071,7 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
       const subLines = wrapText(ctx, text(env, block.subtitle), subBox.w, 0, sub)
       drawSwash(ctx, swashRects(ctx, sheet, sub, subLines, subBox), SURFACES.pink)
       const subH = drawLines(ctx, sheet, sub, subLines, subBox)
-      mark(env, block, ['subtitle'], { ...subBox, h: subH }, sub)
+      mark(env, block, ['subtitle'], { ...subBox, h: subH }, sub, { multiline: true })
 
       if (block.wordmark) {
         const box = { x: P(539.9), y: P(816.7), w: P(110.1), h: P(25.3) }
@@ -893,27 +1111,6 @@ function paintBlock(env: LeafEnv, block: Block, box: Rect, opts: PaintOpts = {})
   }
 }
 
-/**
- * Split a statement into highlighted and plain segments.
- *
- * Matching is by literal phrase, in the order given, each used once. A phrase
- * that isn't found is skipped rather than throwing: highlights are decoration,
- * and losing one should not stop the page rendering.
- */
-function splitHighlights(raw: string, highlights: string[]): Segment[] {
-  const segs: Segment[] = []
-  let rest = raw
-  for (const phrase of highlights) {
-    const at = rest.indexOf(phrase)
-    if (at < 0) continue
-    if (at > 0) segs.push({ text: rest.slice(0, at) })
-    segs.push({ text: phrase, swash: true, alpha: 'body' })
-    rest = rest.slice(at + phrase.length)
-  }
-  if (rest) segs.push({ text: rest })
-  return segs.length ? segs : [{ text: raw }]
-}
-
 // ---------------------------------------------------------------------------
 // Leaf
 // ---------------------------------------------------------------------------
@@ -929,7 +1126,7 @@ function splitHighlights(raw: string, highlights: string[]): Segment[] {
 const hangsFromHeadRule = (block: Block): boolean => block.kind === 'defList'
 
 /** Run the stack once, painting into `env.ctx`. */
-function stack(env: LeafEnv, fill: number): { placed: PlacedBlock[]; end: number } {
+function stack(env: LeafEnv, fill: number): { placed: PlacedBlock[]; origin: number; end: number } {
   const { sheet } = env
   const placed: PlacedBlock[] = []
   const first = env.leaf.blocks[0]
@@ -949,6 +1146,12 @@ function stack(env: LeafEnv, fill: number): { placed: PlacedBlock[]; end: number
 
   env.leaf.blocks.forEach((block, i) => {
     if (i > 0) y += sheet.pt(GAP.block)
+    // A block that has been dragged asks for a top edge, and gets it unless the
+    // flow has already carried the stack past it — see `Block.top`. Taking the
+    // max rather than the value is the whole of the guarantee: a pinned block
+    // can be pushed further down by the one above growing, and can never be
+    // pulled up into it.
+    if (block.top !== undefined) y = Math.max(y, sheet.pt(block.top))
     const box = boxFor(env, block, y)
     const h = paintBlock(env, block, box, {
       hangs: i === 0 && hangs,
@@ -959,7 +1162,7 @@ function stack(env: LeafEnv, fill: number): { placed: PlacedBlock[]; end: number
     y += h
   })
 
-  return { placed, end: y }
+  return { placed, origin: sheet.pt(y0), end: y }
 }
 
 /**
@@ -971,7 +1174,7 @@ function stack(env: LeafEnv, fill: number): { placed: PlacedBlock[]; end: number
  * painters, so what it measures and what gets painted cannot disagree — the one
  * thing this module is built to guarantee.
  */
-export function paintBlocks(env: LeafEnv): { placed: PlacedBlock[]; overflow: boolean } {
+export function paintBlocks(env: LeafEnv): { placed: PlacedBlock[]; origin: number; overflow: boolean } {
   const { sheet } = env
   // A bare plate has no foot rule to respect: its band and its credit run to
   // the trim, so fills are shared out against the page edge instead.
@@ -989,8 +1192,8 @@ export function paintBlocks(env: LeafEnv): { placed: PlacedBlock[]; overflow: bo
     fill = Math.max(0, (bottom - end) / fills)
   }
 
-  const { placed, end } = stack(env, fill)
-  return { placed, overflow: end > bottom + 0.5 }
+  const { placed, origin, end } = stack(env, fill)
+  return { placed, origin, overflow: end > bottom + 0.5 }
 }
 
 /**

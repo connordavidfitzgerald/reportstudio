@@ -1,5 +1,11 @@
 import { blockId, type Block, type BlockSeed } from '../doc/blocks'
+import { phraseMarks } from '../doc/marks'
 import type { Leaf } from '../doc/types'
+
+/** The exec-summary statement, shared by the template and the reference file. */
+const STATEMENT =
+  'Le HUB members spoke with 21 organizers from 16 organizations across 6 provinces.'
+
 
 /** Spelled as in `CHAPTER_PRESETS`, so the panel marks it as the current one. */
 const FINDINGS = 'Findings and Implications'
@@ -104,25 +110,16 @@ export const TEMPLATES: Template[] = [
   {
     id: 'tableOfContents',
     label: 'Table of Contents',
-    note: 'Chapter rows on swashes, sub-rows indented, folios ranged right.',
+    note: 'Chapter rows on swashes, sub-rows indented, folios ranged right. Fills itself in.',
     build: () => ({
       surface: 'paper',
       bodySize: 'xs',
       chapter: 'Table of contents',
-      blocks: [
-        b({ kind: 'tocEntry', label: 'Executive summary', folio: 6 }),
-        b({ kind: 'tocEntry', label: 'Introduction', folio: 12 }),
-        b({
-          kind: 'tocEntry',
-          label: 'Methodology',
-          folio: 13,
-          sections: [
-            { label: 'participant recruitment', folio: 13 },
-            { label: 'data collection', folio: 13 },
-            { label: 'data analysis', folio: 14 },
-          ],
-        }),
-      ],
+      // One block, and no rows in it. The template used to seed three hand-typed
+      // chapters with hand-typed folios, which every new document then had to
+      // find and correct — a contents page that arrived already wrong about the
+      // document it was in.
+      blocks: [b({ kind: 'contents' })],
     }),
   },
   {
@@ -150,8 +147,8 @@ export const TEMPLATES: Template[] = [
       blocks: [
         b({
           kind: 'statement',
-          text: 'Le HUB members spoke with 21 organizers from 16 organizations across 6 provinces.',
-          highlights: ['21 organizers', '16 organizations', '6 provinces'],
+          text: STATEMENT,
+          marks: phraseMarks(STATEMENT, ['21 organizers', '16 organizations', '6 provinces']),
         }),
         b({ kind: 'figure', imageRef: null, aspect: 1.08 }),
         b({ kind: 'text', text: '(Ontario, Quebec, British Columbia)', role: 'statementNote' }),

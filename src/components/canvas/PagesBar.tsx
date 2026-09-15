@@ -4,8 +4,8 @@ import type { Spread } from '../../doc/types'
 import { spreadLabel } from '../../doc/types'
 import { useConfirm } from '../../hooks/useConfirm'
 import { useDeck, useSpreads } from '../../store/useDeck'
-import { useUi } from '../../store/useUi'
 import { LeafThumb } from '../LeafThumb'
+import { Card } from '../ui'
 
 /**
  * Every spread, small, along the foot of the stage.
@@ -18,8 +18,19 @@ import { LeafThumb } from '../LeafThumb'
  * duplicated and deleted, too: half a spread is not something this document can
  * hold (see `pairLeaves`).
  *
- * It floats over the page rather than taking a band of layout beneath it,
- * because it is only wanted while you are looking for a page.
+ * ## It is always there, under the canvas
+ *
+ * It used to be a floating strip over the foot of the page, opened from a "See
+ * all" button on the panel, on the theory that it was only wanted while you
+ * were looking for a page. Both halves of that were wrong. It covered the
+ * bottom of the spread you were editing — the one thing you cannot afford to
+ * hide in a page editor is the page — and being hidden by default meant the
+ * document's shape was something you had to go and ask for, so the answer to
+ * "how long is this report" was a click away at all times.
+ *
+ * So it takes a band of layout of its own beneath the stage. The canvas gets
+ * the rest, which is less room than it had but all of it usable, and
+ * `useContainFit` gives the spread back whatever is left.
  */
 
 /** Thumbnail width for one leaf. A spread is twice this, plus the spine. */
@@ -88,11 +99,8 @@ export function PagesBar() {
   const duplicateSpread = useDeck((s) => s.duplicateSpread)
   const removeSpread = useDeck((s) => s.removeSpread)
   const moveSpread = useDeck((s) => s.moveSpread)
-  const open = useUi((s) => s.pagesOpen)
   const confirm = useConfirm()
   const [dragging, setDragging] = useState<number | null>(null)
-
-  if (!open) return null
 
   const remove = async () => {
     if (
@@ -107,14 +115,16 @@ export function PagesBar() {
     }
   }
 
+  // `bg-control`, not `bg-card`: the bar itself is a card now, and a card-
+  // coloured button on a card is an invisible button.
   const act =
-    'flex h-6 items-center rounded-full bg-card px-2.5 text-2xs leading-none text-ink transition hover:bg-ink hover:text-card'
+    'flex h-6 items-center rounded-full bg-control px-2.5 text-2xs leading-none text-ink transition hover:bg-ink hover:text-card'
 
   return (
-    <div
-      className="pointer-events-auto absolute bottom-5 left-1/2 flex max-w-[calc(100%-2.5rem)]
-        -translate-x-1/2 items-end gap-2.5 overflow-x-auto rounded-card bg-control p-5"
-    >
+    // `items-end` so the current spread can stand proud of the row without the
+    // others being dragged up with it, and `shrink-0` so a long document
+    // scrolls sideways rather than squeezing the canvas above it.
+    <Card className="flex shrink-0 items-end gap-2.5 overflow-x-auto p-4">
       {spreads.map((spread) => (
         <SpreadThumb
           key={spread.kind === 'full' ? spread.leaf.id : spread.left.id}
@@ -150,6 +160,6 @@ export function PagesBar() {
           Delete
         </button>
       </div>
-    </div>
+    </Card>
   )
 }

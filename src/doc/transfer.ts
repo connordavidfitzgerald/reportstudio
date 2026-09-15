@@ -11,9 +11,10 @@ import { CURRENT_VERSION, migrate, type StoredAny } from '../store/migrations'
  *
  * A deck is plain JSON, so `JSON.stringify(deck)` looks like a complete
  * document. It isn't: an uploaded photograph is stored as `{ kind: 'blob', id }`
- * pointing into *this* origin's IndexedDB. Sent to a colleague, every one of
- * those refs resolves to nothing and the report arrives as a set of grey boxes —
- * silently, since a missing image is a legitimate state.
+ * pointing into *this account's* private storage. Sent to a colleague, every one
+ * of those refs resolves to nothing — their account cannot read our objects, and
+ * row-level security is what makes sure of it — and the report arrives as a set
+ * of grey boxes, silently, since a missing image is a legitimate state.
  *
  * So the format carries the bytes: every referenced blob is written out as a
  * data URI beside the deck, and importing writes them back as fresh uploads and

@@ -20,6 +20,8 @@ const LOREM =
   'process, and the conditions organizers work in change faster than the ' +
   'resources built to support them.'
 
+import { phraseMarks } from './marks'
+
 export function createBlock(kind: BlockKind): Block {
   const id = blockId()
   switch (kind) {
@@ -43,13 +45,15 @@ export function createBlock(kind: BlockKind): Block {
       return { id, kind }
     case 'spacer':
       return { id, kind, height: 40 }
-    case 'statement':
+    case 'statement': {
+      const text = 'Le HUB members spoke with 21 organizers from 16 organizations across 6 provinces.'
       return {
         id,
         kind,
-        text: 'Le HUB members spoke with 21 organizers from 16 organizations across 6 provinces.',
-        highlights: ['21 organizers', '16 organizations', '6 provinces'],
+        text,
+        marks: phraseMarks(text, ['21 organizers', '16 organizations', '6 provinces']),
       }
+    }
     case 'quoteOverlay':
       return { id, kind, text: '“There are lots of people who are excited about things.”', col: 1, span: 7 }
     case 'defList':
@@ -85,6 +89,26 @@ export function createBlock(kind: BlockKind): Block {
           { label: 'Building coalitions' },
         ],
       }
+    case 'contents':
+      // Nothing to seed. It reads the document.
+      return { id, kind }
+
+    case 'table':
+      // Three columns of equal share, a header row, and two rows under it —
+      // enough that it reads as a table on the page straight away, and small
+      // enough to be quicker to fill than to cut down.
+      return {
+        id,
+        kind,
+        header: true,
+        widths: [1, 1, 1],
+        rows: [
+          ['Region', 'Organizations', 'Interviews'],
+          ['Ontario', '—', '—'],
+          ['Quebec', '—', '—'],
+        ],
+      }
+
     case 'credits':
       return {
         id,
@@ -184,6 +208,12 @@ export const BLOCK_INFO: Record<BlockKind, BlockInfo> = {
   bulletList: { label: 'Bullet list', group: 'Lists & data', hint: 'Short items, in one column or two.' },
   links: { label: 'Links', group: 'Lists & data', hint: 'Underlined resources, each with an optional note.' },
   credits: { label: 'Credits', group: 'Lists & data', hint: 'Role and name, stacked — the colophon.' },
+  table: { label: 'Table', group: 'Lists & data', hint: 'Rows and columns, ruled and on the grid.' },
+  contents: {
+    label: 'Contents',
+    group: 'Text',
+    hint: 'Every chapter and section in the document, with its page number. Fills itself in.',
+  },
   chart: { label: 'Bar chart', group: 'Lists & data', hint: 'Horizontal bars whose width is their value.' },
   tocEntry: { label: 'Contents entry', group: 'Lists & data', hint: 'A chapter row with its page number.' },
 
@@ -223,13 +253,26 @@ export const BLOCK_GROUPS: { group: BlockGroup; kinds: BlockKind[] }[] = (
  *
  * So `BLOCK_ORDER` and `BLOCK_LABELS` stay exhaustive — every kind still needs a
  * name for the canvas's own labels — and only this list is short.
+ *
+ * ## Why `spacer` is not offered any more
+ *
+ * It still exists, and `height: 'fill'` is load-bearing — it is what pushes a
+ * plate's caption band to the foot of the page, and `render/compose.ts` runs the
+ * whole stack twice to resolve it. But a spacer with a *number* on it was being
+ * used for something else: to shove a block down the page, because dragging one
+ * was not possible and the arrows only swapped neighbours.
+ *
+ * Dragging is possible now, so that use is gone, and offering the block invites
+ * it back. A page whose rhythm is a column of hand-tuned 40pt gaps is a page
+ * that reflows into nonsense the moment a paragraph above it grows by a line —
+ * which is exactly the failure a flow layout exists to prevent.
  */
 export const OFFERED_GROUPS: { group: string; kinds: BlockKind[] }[] = [
   { group: 'Text (regular)', kinds: ['heading', 'para', 'subhead', 'text'] },
   { group: 'Text (display)', kinds: ['statement', 'quote'] },
-  { group: 'Lists and Data', kinds: ['defList', 'bulletList'] },
+  { group: 'Lists and Data', kinds: ['defList', 'bulletList', 'table'] },
   { group: 'Media', kinds: ['figure'] },
-  { group: 'Layout', kinds: ['rule', 'spacer'] },
+  { group: 'Layout', kinds: ['rule'] },
 ]
 
 /**

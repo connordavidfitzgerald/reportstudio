@@ -5,28 +5,30 @@ import {
   BulletListEditor,
   ChartEditor,
   CoverEditor,
-  CreditsEditor,
-  DefListEditor,
   FigureEditor,
   LinksEditor,
-  ParaEditor,
-  QuoteEditor,
   QuoteOverlayEditor,
   SpacerEditor,
-  StatementEditor,
+  TableEditor,
   TextEditor,
   TocEntryEditor,
 } from './editors'
-import { LocalizedField } from './fields'
 
 /**
- * The editor for whichever component is selected.
+ * The settings for whichever component is selected.
  *
  * A switch rather than a `Record<BlockKind, FC>` on purpose: the switch is what
  * narrows the union, so each editor receives its own block type with no casts,
- * and a new kind fails to compile until it has one. A registry keyed by kind
- * would need a cast at every entry, which is precisely where a mis-typed editor
- * would slip through.
+ * and a new kind fails to compile until it has been considered here. A registry
+ * keyed by kind would need a cast at every entry, which is precisely where a
+ * mis-typed editor would slip through.
+ *
+ * `hasBlockSettings` in `./settings.ts` says which kinds have anything here,
+ * and must agree with the switch below.
+ *
+ * Most kinds now return null: a paragraph, a quote, a heading, a definition list
+ * and the rest are *entirely* words on the page, and words on the page are typed
+ * on the page. See the note at the head of `./editors.tsx`.
  */
 
 export function BlockEditor({ block }: { block: Block }) {
@@ -35,60 +37,42 @@ export function BlockEditor({ block }: { block: Block }) {
   const patch = <T,>(p: T) => updateBlock(block.id, p as Partial<Block>)
 
   switch (block.kind) {
-    // The four that are a single run of words and nothing else.
-    case 'heading':
-    case 'deck':
-    case 'sectionHeading':
-    case 'subhead':
-      return (
-        <LocalizedField
-          value={block.text}
-          onChange={(text) => patch({ text })}
-          multiline
-          rows={block.kind === 'deck' ? 3 : 2}
-        />
-      )
-
-    case 'para':
-      return <ParaEditor block={block} patch={patch} />
-    case 'quote':
-      return <QuoteEditor block={block} patch={patch} />
-    case 'statement':
-      return <StatementEditor block={block} patch={patch} />
     case 'quoteOverlay':
       return <QuoteOverlayEditor block={block} patch={patch} />
     case 'text':
       return <TextEditor block={block} patch={patch} />
     case 'band':
       return <BandEditor block={block} patch={patch} />
-
-    case 'defList':
-      return <DefListEditor block={block} patch={patch} />
     case 'bulletList':
       return <BulletListEditor block={block} patch={patch} />
     case 'links':
       return <LinksEditor block={block} patch={patch} />
-    case 'credits':
-      return <CreditsEditor block={block} patch={patch} />
     case 'chart':
       return <ChartEditor block={block} patch={patch} />
     case 'tocEntry':
       return <TocEntryEditor block={block} patch={patch} />
-
     case 'figure':
       return <FigureEditor block={block} patch={patch} />
     case 'cover':
       return <CoverEditor block={block} patch={patch} />
-
     case 'spacer':
       return <SpacerEditor block={block} patch={patch} />
+    case 'table':
+      return <TableEditor block={block} patch={patch} />
 
+    // Words on the page, and nothing else.
+    case 'heading':
+    case 'deck':
+    case 'sectionHeading':
+    case 'subhead':
+    case 'para':
+    case 'quote':
+    case 'statement':
+    case 'defList':
+    case 'credits':
     case 'rule':
-      return (
-        <p className="px-1 text-[11px] leading-snug text-dim">
-          A hairline across the measure. Nothing to set — move it, or change how many columns it
-          spans.
-        </p>
-      )
+    // A contents block holds nothing at all: it reads the document.
+    case 'contents':
+      return null
   }
 }

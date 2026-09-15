@@ -1,17 +1,16 @@
 import { create } from 'zustand'
-import type { Block, BlockId, BlockKind } from '../doc/blocks'
+import { blockId, type Block, type BlockId, type BlockKind } from '../doc/blocks'
 import { createBlock, createDeck, createLeaf, pairLeaves, seedDeck } from '../doc/defaults'
 import type { Deck, Leaf } from '../doc/types'
 import { deckSpreads, leafId } from '../doc/types'
 import type { Lang } from '../doc/localized'
 import { templateById } from '../templates'
-import { clearLegacySession, loadLegacySession } from './session'
 import {
   documentId,
   flushSave,
+  hasUnsavedWork,
   listDocuments,
   loadDocument,
-  saveDocument,
   scheduleSave,
   setLastOpened,
   lastOpened,
@@ -116,6 +115,17 @@ interface DeckState {
   // -- the caret -----------------------------------------------------------
   /** Put the caret in a field, or take it out of the page entirely. */
   setCaret(caret: Caret | null): void
+  /**
+   * Ask for the caret to be put in a block, without saying where in it.
+   *
+   * A caret needs a *field*, and which fields a block has — and where they
+   * ended up — is the compositor's answer, not this store's. So Enter on a
+   * selected component names the block, and `SpreadCanvas` turns that into a
+   * caret in its first region as soon as it has painted one. Cleared by the
+   * canvas once it has been honoured.
+   */
+  editRequest: BlockId | null
+  requestEdit(id: BlockId | null): void
   /** Update just the selected range, as the textarea reports it. */
   setSelection(from: number, to: number): void
   addBlock(kind: BlockKind, at?: number): void
@@ -124,12 +134,72 @@ interface DeckState {
   swapBlock(id: BlockId, kind: BlockKind): void
   removeBlock(id: BlockId): void
   moveBlock(id: BlockId, delta: number): void
+  /**
+   * Move a block to a given index on a given leaf, across pages if need be.
+   *
+   * The only block mutator that is not scoped to the selected leaf, because it
+   * is the only one whose whole purpose is to leave it. Dragging a component
+   * onto the facing page is the gesture; before this there was no way at all to
+   * move one between pages.
+   *
+   * `at` is an insertion point in the *destination* leaf as it stands before
+   * the move — 0 for the top, `blocks.length` for the bottom — so a caller can
+   * hand over the boundary it drew on the page without adjusting for the block
+   * it is about to remove.
+   *
+   * `place` is the rest of the answer, and it arrives with `at` because one
+   * gesture decides all of it: the top edge the block was dropped on, and the
+   * blocks already on that leaf that have to be told where they are so removing
+   * this one doesn't let them flow up. See `Placement` in
+   * `components/canvas/useBlockDrag.ts`. Omitted by the keyboard move, which
+   * reorders without claiming anything about position.
+   */
+  moveBlockTo(
+    id: BlockId,
+    toLeaf: number,
+    at: number,
+    place?: { top: number; pins: { id: BlockId; top: number }[] },
+  ): void
+  /**
+   * Put the selected block on the clipboard, and take it off again.
+   *
+   * A module-level copy rather than the system clipboard: a block is a shape
+   * this application understands and nothing else does, and writing JSON into
+   * the OS clipboard would mean clobbering whatever text somebody had there.
+   * The cost is that it does not survive a reload or reach a second tab, which
+   * is what `doc/transfer.ts` and the `.lehub.json` download are for.
+   */
+  copyBlock(id: BlockId): void
+  /** Paste the copied block at the armed insert point, or at the foot. */
+  pasteBlock(): void
+  /**
+   * Add one page after `after` (the current leaf by default).
+   *
+   * A page rather than a spread, because "new page" is what somebody means. The
+   * pairing invariant is preserved by `pairLeaves` inside `commit`, which adds
+   * the facing blank when one is needed — see {@link addSpread}, which is still
+   * how two are added at once.
+   */
+  addLeaf(after?: number): void
   /** Copy a block in place, directly below the original. */
   duplicateBlock(id: BlockId): void
 
   undo(): void
   redo(): void
 }
+
+/**
+ * The copied block, if there is one.
+ *
+ * Module-level rather than store state on purpose: it is not part of the
+ * document, it must survive `openDocument` (copying a component out of one
+ * report and into another is most of why this exists), and putting it in the
+ * store would put it on the undo stack.
+ */
+let clipboard: Block | null = null
+
+/** Is there anything to paste? Read by the key handler to leave ⌘V alone if not. */
+export const hasCopiedBlock = (): boolean => clipboard !== null
 
 const move = <T>(list: T[], from: number, to: number): T[] => {
   const next = [...list]
@@ -238,14 +308,20 @@ export const useDeck = create<DeckState>((set, get) => {
       const deck = from === 'seed' ? seedDeck() : createDeck()
       const id = documentId()
       install(deck, id)
-      await saveDocument(id, deck)
+      // Through the autosave layer rather than a bare `saveDocument` whose
+      // boolean was discarded: a first write that fails now shows in the save
+      // indicator and retries, instead of leaving an unsaved document that
+      // looks saved.
+      scheduleSave(id, deck)
+      await flushSave()
     },
 
     adoptDocument: async (deck) => {
       await flushSave()
       const id = documentId()
       install(deck, id)
-      await saveDocument(id, deck)
+      scheduleSave(id, deck)
+      await flushSave()
     },
 
     resetToSeed: () => commit((deck) => ({ ...seedDeck(), name: deck.name })),
@@ -284,6 +360,44 @@ export const useDeck = create<DeckState>((set, get) => {
         ...d,
         leaves: [...d.leaves.slice(0, at), createLeaf(), createLeaf(), ...d.leaves.slice(at)],
       }))
+      set({ leafIndex: at, selectedBlock: null, insertAt: null, caret: null })
+    },
+
+    editRequest: null,
+    requestEdit: (editRequest) => set({ editRequest }),
+
+    copyBlock: (id) => {
+      const block = get().deck.leaves.flatMap((l) => l.blocks).find((b) => b.id === id)
+      clipboard = block ? structuredClone(block) : null
+    },
+
+    pasteBlock: () => {
+      if (!clipboard) return
+      // A fresh id, and a fresh copy of the marks: pasting twice must not give
+      // two blocks that share one mark map, where bolding a word in the second
+      // bolds it in the first.
+      // Without `top` — see `duplicateBlock`. A pasted block lands in the flow
+      // at the insert point rather than on top of wherever it was cut from,
+      // which may well be a different page.
+      const copy = { ...structuredClone(clipboard), id: blockId(), top: undefined }
+      const at = get().insertAt
+      onLeaf((leaf) => {
+        const next = [...leaf.blocks]
+        next.splice(at ?? next.length, 0, copy)
+        return { ...leaf, blocks: next }
+      })
+      set({ selectedBlock: copy.id, insertAt: null, caret: null })
+    },
+
+    addLeaf: (after) => {
+      const at = (after ?? get().leafIndex) + 1
+      commit((d) => ({
+        ...d,
+        leaves: [...d.leaves.slice(0, at), createLeaf(), ...d.leaves.slice(at)],
+      }))
+      // `commit` runs `pairLeaves`, which completes the spread when adding one
+      // leaf strands a verso — so a single page can be added without anyone
+      // having to think in facing pairs, and the pairing rule still holds.
       set({ leafIndex: at, selectedBlock: null, insertAt: null, caret: null })
     },
 
@@ -424,12 +538,12 @@ export const useDeck = create<DeckState>((set, get) => {
         ...leaf,
         blocks: leaf.blocks.map((b) => {
           if (b.id !== id) return b
-          // Keep the id and the column run — swapping a paragraph for a quote
-          // should not also move it back to the full measure — but take
-          // everything else from the new kind's seed, since the old block's
-          // fields mean nothing to it.
+          // Keep the id and where the block sits — swapping a paragraph for a
+          // quote should not also move it back to the full measure, or undo the
+          // place somebody dragged it to — but take everything else from the
+          // new kind's seed, since the old block's fields mean nothing to it.
           const seed = createBlock(kind)
-          return { ...seed, id: b.id, col: b.col, span: b.span } as Block
+          return { ...seed, id: b.id, col: b.col, span: b.span, top: b.top } as Block
         }),
       })),
 
@@ -441,14 +555,93 @@ export const useDeck = create<DeckState>((set, get) => {
       if (get().selectedBlock === id) set({ selectedBlock: null, insertAt: null })
     },
 
+    /**
+     * Swap a block with its neighbour — ⌘⌥↑ and ⌘⌥↓.
+     *
+     * The two exchange `top` as well as places, which is the whole of making
+     * this still work now that a block can name where it sits. Reordering alone
+     * would move them in the list and leave each pinned to the y it already
+     * had, so the one going up would not go up: the pins would hold the page
+     * exactly as it was and the keystroke would look broken. Swapping the slots
+     * is also the honest reading of the gesture — two components trade places,
+     * and the page's vertical rhythm is a property of the page rather than of
+     * whichever block happens to be in the slot.
+     */
     moveBlock: (id, delta) =>
       onLeaf((leaf) => {
         const from = leaf.blocks.findIndex((b) => b.id === id)
         if (from < 0) return leaf
         const to = from + delta
         if (to < 0 || to >= leaf.blocks.length) return leaf
-        return { ...leaf, blocks: move(leaf.blocks, from, to) }
+        const a = leaf.blocks[from]
+        const b = leaf.blocks[to]
+        const swapped = leaf.blocks.map((block, n) =>
+          n === from ? ({ ...a, top: b.top } as Block) : n === to ? ({ ...b, top: a.top } as Block) : block,
+        )
+        return { ...leaf, blocks: move(swapped, from, to) }
       }),
+
+    moveBlockTo: (id, toLeaf, at, place) => {
+      commit((deck) => {
+        const from = deck.leaves.findIndex((l) => l.blocks.some((b) => b.id === id))
+        const dest = deck.leaves[toLeaf]
+        if (from < 0 || !dest) return deck
+
+        const source = deck.leaves[from]
+        const i = source.blocks.findIndex((b) => b.id === id)
+        const placed = (b: Block): Block =>
+          place === undefined || place.top === b.top ? b : ({ ...b, top: place.top } as Block)
+
+        /**
+         * Tell the blocks that were already there where they are.
+         *
+         * Without this, taking the dragged block out of the stack lets
+         * everything below it flow up by that block's height — so dropping one
+         * component tidily into place would move three others, which is the
+         * behaviour this whole gesture exists to stop. Only blocks with nothing
+         * pinning them yet are written; the rest already know.
+         */
+        const pin = (blocks: Block[]): Block[] => {
+          const tops = new Map(place?.pins.map((p) => [p.id, p.top]))
+          if (!tops.size) return blocks
+          return blocks.map((b) => {
+            const top = tops.get(b.id)
+            return top === undefined || b.top !== undefined ? b : ({ ...b, top } as Block)
+          })
+        }
+
+        if (from === toLeaf) {
+          // `at` is a boundary among the *other* blocks, so it needs no
+          // adjusting for the one being removed — it was never counted.
+          const rest = pin(source.blocks.filter((b) => b.id !== id))
+          const moved = placed(source.blocks[i])
+          const next = [...rest]
+          next.splice(Math.max(0, Math.min(next.length, at)), 0, moved)
+          if (next.every((b, n) => b === source.blocks[n])) return deck
+          return {
+            ...deck,
+            leaves: deck.leaves.map((leaf, n) => (n === from ? { ...leaf, blocks: next } : leaf)),
+          }
+        }
+
+        const block = placed(source.blocks[i])
+        const next = pin(dest.blocks)
+        next.splice(Math.max(0, Math.min(next.length, at)), 0, block)
+        return {
+          ...deck,
+          leaves: deck.leaves.map((leaf, n) =>
+            n === from
+              ? { ...leaf, blocks: leaf.blocks.filter((b) => b.id !== id) }
+              : n === toLeaf
+                ? { ...leaf, blocks: next }
+                : leaf,
+          ),
+        }
+      })
+      // Follow the block. Landing on a page you are not editing would leave the
+      // thing you just dragged selected but untypeable.
+      set({ leafIndex: toLeaf, selectedBlock: id, insertAt: null, caret: null })
+    },
 
     duplicateBlock: (id) => {
       const copyId = `${id}_c${Date.now().toString(36)}`
@@ -464,6 +657,12 @@ export const useDeck = create<DeckState>((set, get) => {
         const copy = {
           ...source,
           id: copyId,
+          // Not the source's `top`. The copy goes directly under the original,
+          // in the flow, which is where a duplicate belongs — carrying the top
+          // over would pin it to the y the original already occupies, and the
+          // only thing keeping the two from overlapping would be the flow
+          // pushing it back down to exactly where it is going anyway.
+          top: undefined,
           ...(source.marks ? { marks: structuredClone(source.marks) } : {}),
         }
         return {
@@ -516,21 +715,34 @@ export const useSpreads = () => useDeck((s) => deckSpreads(s.deck))
 /**
  * Decide what is open when the editor starts, once on boot.
  *
- * In order: the previous build's single localStorage session (rescued into the
- * library and then forgotten), the document last open, the most recently
- * edited, and finally a new document seeded with the reference report — which
- * is what a first-time visitor sees, and the reason the design system is
- * visible before anyone has typed anything.
+ * In order: the document last open, the most recently edited, and finally a new
+ * document seeded with the reference report — which is what somebody with an
+ * empty account sees, and the reason the design system is visible before anyone
+ * has typed anything.
+ *
+ * ## An unreadable library is not an empty one
+ *
+ * This used to treat them the same, which was fine when the library was a local
+ * IndexedDB read that effectively never failed. Against a server it is the
+ * difference between "you are new here" and "your forty reports could not be
+ * reached" — and acting on the first when the second is true opens a new seeded
+ * document over the top of somebody's work. So a failed list returns `false`
+ * and the caller shows the failure rather than inventing a document.
  */
-export async function bootstrap(): Promise<void> {
-  const store = useDeck.getState()
+/**
+ * The result of a first load.
+ *
+ * A bare boolean was enough while the only way to fail was a tunnel. It is not
+ * enough now: a rejection from PostgREST — a column the client selects that the
+ * schema has not been given yet, a policy that refuses — arrives here the same
+ * way, and reporting it as "check your connection" sends somebody to look at
+ * their router for a migration that was never run. Carry the server's own words
+ * up to the screen.
+ */
+export type BootstrapResult = { ok: true } | { ok: false; error: string }
 
-  const legacy = loadLegacySession()
-  if (legacy) {
-    clearLegacySession()
-    await store.adoptDocument({ ...legacy, name: legacy.name ?? 'My report' })
-    return
-  }
+export async function bootstrap(): Promise<BootstrapResult> {
+  const store = useDeck.getState()
 
   const wanted = lastOpened()
   if (wanted) {
@@ -543,30 +755,50 @@ export async function bootstrap(): Promise<void> {
         selectedBlock: null,
         insertAt: null,
       })
-      return
+      return { ok: true }
     }
   }
 
-  const [newest] = await listDocuments()
+  const { rows, error } = await listDocuments()
+  if (error) return { ok: false, error }
+
+  const [newest] = rows
   if (newest) {
     await store.openDocument(newest.id)
-    return
+    return { ok: true }
   }
 
   await store.newDocument('seed')
+  return { ok: true }
 }
 
 /**
  * Write anything outstanding before the tab goes away.
  *
- * The debounce means the last few hundred milliseconds of typing are otherwise
- * in memory only, and `visibilitychange` is the last event a closing tab is
- * guaranteed to deliver.
+ * The debounce means the last second or so of typing is otherwise in memory
+ * only, and `visibilitychange` is the last event a closing tab is guaranteed to
+ * deliver. That was a guarantee when the write was local; against a server it is
+ * only a head start, because a closing tab will not wait for a round trip and
+ * `sendBeacon` cannot carry the `Authorization` header.
+ *
+ * So the flush stays — it shortens the window in every case where the tab is
+ * merely hidden rather than closing — and `beforeunload` covers the rest by
+ * saying so, which is the only honest option left.
  */
 export function flushOnHide(): () => void {
   const onHide = () => {
     if (document.visibilityState === 'hidden') void flushSave()
   }
+  const onUnload = (e: BeforeUnloadEvent) => {
+    if (!hasUnsavedWork()) return
+    e.preventDefault()
+    // Modern browsers show their own wording; the string is for old ones.
+    e.returnValue = ''
+  }
   document.addEventListener('visibilitychange', onHide)
-  return () => document.removeEventListener('visibilitychange', onHide)
+  window.addEventListener('beforeunload', onUnload)
+  return () => {
+    document.removeEventListener('visibilitychange', onHide)
+    window.removeEventListener('beforeunload', onUnload)
+  }
 }

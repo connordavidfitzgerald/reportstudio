@@ -99,6 +99,60 @@ export const CONTENT_H = CONTENT_BOTTOM - CONTENT_TOP; // 745
 /** Hairline rules, above the running head and at the foot of every leaf. */
 export const RULE_WEIGHT = 1;
 
+// ---------------------------------------------------------------------------
+// The row grid
+// ---------------------------------------------------------------------------
+
+/**
+ * Thirteen rows down the content band, on the same 7pt gutter as the columns.
+ *
+ *   13 × 50.846 + 12 × 7 = 661 + 84 = 745
+ *
+ * ## This is an editing grid, not a transcription
+ *
+ * Everything above this line was measured off the Figma. This was not, and the
+ * note below is still true: the file has **no baseline grid**, and the eleven
+ * spreads are not registered to shared horizontal lines. So this is the one
+ * deliberately *invented* number in the module, and it is invented for a
+ * reason: a block dragged down the page used to be able to stop anywhere on a
+ * 10pt step, which asks whoever is dragging it to have an opinion about
+ * vertical rhythm. Most people using this do not have one, and should not need
+ * one. Thirteen rows give them somewhere to let go.
+ *
+ * It does not change what the compositor does on its own. A page nobody has
+ * dragged anything on stacks exactly as it always did — see `render/compose.ts`
+ * and {@link import('../doc/blocks').Block.top}. The rows are where a *drag*
+ * comes to rest, and what the guides draw.
+ *
+ * ## Why thirteen
+ *
+ * Because 50.846 is 51, near enough — the column width. The module is square,
+ * so the vertical grid is the horizontal one turned on its side rather than a
+ * second, unrelated set of lines, and a two-column figure three rows tall is
+ * actually square on the page. Thirteen is also the only count in the useful
+ * range (8–19) that lands there; twelve gives 55.7 and fourteen 46.7, both of
+ * which read as "some number" next to a 51pt column.
+ *
+ * The last row's foot is `CONTENT_BOTTOM` exactly, so the band is fully divided
+ * and the bottom margin is a row line like any other.
+ */
+export const ROWS = 13;
+
+/** One row module, in points. Within 0.16pt of {@link COL_W}: the module is square. */
+export const ROW_H = (CONTENT_H - GUTTER * (ROWS - 1)) / ROWS; // 50.846…
+
+/** Row line to row line. */
+export const ROW_PITCH = ROW_H + GUTTER; // 57.846…
+
+/** The y of row `r`'s top edge (0-based), in page points. */
+export const rowY = (r: number): number => CONTENT_TOP + r * ROW_PITCH;
+
+/** Every row line, plus the foot of the last row, in page points. */
+export const ROW_LINES: readonly number[] = [
+  ...Array.from({ length: ROWS }, (_, r) => rowY(r)),
+  CONTENT_BOTTOM,
+];
+
 /**
  * There is **no baseline grid**. The file stacks content with auto-layout gaps,
  * and facing pages are not registered to shared lines — checked across all 11
@@ -147,12 +201,25 @@ export type SurfaceId = keyof typeof SURFACES;
  * arbitrary values: `body` is the default, `strong` picks the un-highlighted
  * words out of a statement, `soft` sets a quote overlay back into its
  * photograph, `muted` is a chart sub-label under its label.
+ *
+ * ## These are higher than the file's
+ *
+ * The Figma sets body copy at 70% black. On cream that is roughly 5.9:1 — it
+ * passes for large type and fails for the 12.6pt methodology pages, which are
+ * the densest reading in the report. The ladder has been raised to the values
+ * below, which is a deliberate departure from the source file rather than a
+ * transcription error: the *relationships* are what the design encodes, and
+ * they are preserved.
+ *
+ * `soft` is raised least. It is the quote overlay lying in a photograph, and
+ * the whole effect is that the words are part of the image; taking it much
+ * further lifts them off it.
  */
 export const INK_ALPHA = {
-    strong: 0.8,
-    body: 0.7,
-    soft: 0.6,
-    muted: 0.5,
+    strong: 0.95,
+    body: 0.88,
+    soft: 0.74,
+    muted: 0.62,
 } as const;
 
 export type InkAlphaId = keyof typeof INK_ALPHA;

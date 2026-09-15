@@ -95,29 +95,74 @@
 }
 
 :root {
-    color-scheme: light;
+    /*
+     * The chrome palette, as plain custom properties so a theme can be swapped
+     * at runtime. `@theme inline` below maps Tailwind's `--color-*` namespace
+     * onto these rather than onto literals: `inline` means the utilities emit
+     * `var(--ui-card)` at the use site, which is the only reason `bg-card` can
+     * change colour without a rebuild. Declare a literal there instead and the
+     * theme is baked into the stylesheet.
+     *
+     * Dark is the default because it is what the editor has always looked like
+     * — two dark cards floating on a light ground, measured off the Figma frame
+     * `DEFAULT`. Light is the addition. The OS preference is deliberately *not*
+     * consulted: most machines report light, so honouring it would silently
+     * change the editor's appearance for nearly everyone who never asked.
+     *
+     * These describe the *interface*. The document's own colours live in
+     * `config/brand.ts` and have nothing to do with them — the page stays cream
+     * paper whatever the chrome is wearing.
+     */
+    color-scheme: dark;
+
+    --ui-ground: #e8e8e8;
+    --ui-card: #343434;
+    --ui-control: #494949;
+    --ui-ink: #ffffff;
+    --ui-dim: rgba(255, 255, 255, 0.7);
+    --ui-danger: #ff8fa3;
 }
 
-/*
- * The chrome's palette, measured off the Figma (frame `DEFAULT`). Two dark cards
- * floating on a light ground, with one raised tone for every control.
- *
- * These describe the *interface*. The document's own colours live in
- * `config/brand.ts` and have nothing to do with them — the page stays cream
- * paper whatever the chrome is wearing.
- */
+:root[data-theme="light"] {
+    color-scheme: light;
+
+    /* The ground lifts with the cards, or white-on-#e8e8e8 reads as a dialog
+     * sitting on a disabled page rather than as the page itself. */
+    --ui-ground: #f2f2f2;
+    --ui-card: #ffffff;
+    --ui-control: #ebebeb;
+    --ui-ink: #1a1a1a;
+    --ui-dim: rgba(0, 0, 0, 0.6);
+    /* The dark theme's #ff8fa3 is a pale red for reading against #343434. The
+     * same value on white is barely a colour at all, let alone a warning. */
+    --ui-danger: #c1123a;
+}
+
 @theme inline {
     --font-ui: "ABC Favorit";
     --font-display: "Review Condensed";
     --font-text: "Neue Haas Grotesk";
     --font-mono: "Neue Montreal Mono";
 
-    --color-ground: #e8e8e8;
-    --color-card: #343434;
-    --color-control: #494949;
-    --color-ink: #ffffff;
-    --color-dim: rgba(255, 255, 255, 0.7);
+    --color-ground: var(--ui-ground);
+    --color-card: var(--ui-card);
+    --color-control: var(--ui-control);
+    --color-ink: var(--ui-ink);
+    --color-dim: var(--ui-dim);
+    --color-danger: var(--ui-danger);
+
+    /*
+     * Two pinks that were one.
+     *
+     * `accent` is the brand: it is `swashFor()` in `config/brand.ts`, the bar
+     * behind a statement's highlighted words, and it belongs to the *document*.
+     * `select` is the editor saying "this is the thing you have hold of" — an
+     * affordance, not a colour of the design. They were the same value, which
+     * meant a selected block and a highlighted phrase were indistinguishable on
+     * a page whose whole point is that pink means something.
+     */
     --color-accent: #ff669e;
+    --color-select: #0a84ff;
 
     /* Three sizes, and only three: 18 section, 12 value, 11 label. */
     --text-2xs: 12px;
@@ -135,8 +180,8 @@ body,
 
 body {
     font-family: var(--font-ui), "Helvetica Neue", Helvetica, Arial, sans-serif;
-    background: #e8e8e8;
-    color: #ffffff;
+    background: var(--ui-ground);
+    color: var(--ui-ink);
     -webkit-font-smoothing: antialiased;
 }
 
@@ -180,4 +225,18 @@ input[type="range"].slider::-moz-range-thumb {
     background: currentColor;
     border: none;
     box-shadow: none;
+}
+
+/*
+ * The sign-in splash. Painted immediately but faded in on a delay, so a session
+ * restored from localStorage (the common case) shows nothing at all, and only a
+ * genuinely slow token refresh puts a word on the screen.
+ */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
 }

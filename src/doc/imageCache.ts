@@ -24,8 +24,27 @@ export const refKey = (ref: ImageRef): string =>
 const cache = new Map<string, HTMLImageElement>()
 /** In-flight loads, so N elements sharing a ref trigger one decode. */
 const pending = new Map<string, Promise<HTMLImageElement | null>>()
-/** Refs that resolved to nothing (deleted blob, dead URL) — don't retry forever. */
-const failed = new Set<string>()
+/**
+ * Refs that resolved to nothing, and when.
+ *
+ * This used to be a plain `Set` — a permanent blacklist, which was right when a
+ * failure meant a deleted IndexedDB key and could not un-happen. Now a failure
+ * is usually a dropped connection, and blacklisting one would leave the page
+ * blank for the rest of the session even after the network came back. So the
+ * entry expires, and `online` clears the lot.
+ */
+const failed = new Map<string, number>()
+
+/** How long a failed reference stays failed before it is worth another try. */
+const RETRY_AFTER_MS = 30_000
+
+const isFailed = (key: string): boolean => {
+  const at = failed.get(key)
+  if (at === undefined) return false
+  if (Date.now() - at < RETRY_AFTER_MS) return true
+  failed.delete(key)
+  return false
+}
 
 let version = 0
 const listeners = new Set<() => void>()
@@ -40,14 +59,18 @@ export function preload(ref: ImageRef): Promise<HTMLImageElement | null> {
   const key = refKey(ref)
   const hit = cache.get(key)
   if (hit) return Promise.resolve(hit)
-  if (failed.has(key)) return Promise.resolve(null)
+  if (isFailed(key)) return Promise.resolve(null)
 
   let inFlight = pending.get(key)
   if (!inFlight) {
     inFlight = loadImageRef(ref).then((img) => {
       pending.delete(key)
-      if (img) cache.set(key, img)
-      else failed.add(key)
+      if (img) {
+        cache.set(key, img)
+        failed.delete(key)
+      } else {
+        failed.set(key, Date.now())
+      }
       publish()
       return img
     })
@@ -66,8 +89,18 @@ export function getImage(ref: ImageRef | null): HTMLImageElement | null {
   const key = refKey(ref)
   const hit = cache.get(key)
   if (hit) return hit
-  if (!failed.has(key)) void preload(ref)
+  if (!isFailed(key)) void preload(ref)
   return null
+}
+
+// A connection coming back makes every past failure worth one more try, and a
+// repaint is what actually triggers it via `getImage`.
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    if (!failed.size) return
+    failed.clear()
+    publish()
+  })
 }
 
 /**
@@ -75,8 +108,10 @@ export function getImage(ref: ImageRef | null): HTMLImageElement | null {
  *
  * Both block kinds have to be listed. An earlier version checked only `figure`,
  * which meant an uploaded *cover* photograph was absent from `collectBlobIds` —
- * so the boot-time `pruneImageBlobs` sweep deleted it as unreferenced, and the
- * export's `imagesReady` gate didn't wait for it.
+ * so the boot-time sweep deleted it as unreferenced, and the export's
+ * `imagesReady` gate didn't wait for it. That sweep is gone, but the list is
+ * still what `deleteDocument` uses to clear a report's photographs, and it is
+ * still the export's readiness gate, so an omission here is still a bug.
  */
 function leafRefs(leaf: Leaf): ImageRef[] {
   const refs: ImageRef[] = []
@@ -123,7 +158,8 @@ export function collectImageRefs(deck: Deck): ImageRef[] {
   return [...seen.values()]
 }
 
-/** Blob ids still referenced by a deck — the keep-set for `pruneImageBlobs`. */
+/** Upload ids a deck still points at — what `deleteDocument` clears, and what
+ *  `store/localImport.ts` carries into an account. */
 export function collectBlobIds(deck: Deck): string[] {
   return collectImageRefs(deck)
     .filter((r) => r.kind === 'blob')

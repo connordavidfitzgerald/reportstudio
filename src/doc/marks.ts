@@ -1,7 +1,7 @@
-import type { Lang } from './localized'
+import { LANGS, t, type Lang, type LocalizedText } from './localized'
 
 /**
- * Bold, italic, underline and links, as ranges over a field's plain text.
+ * Bold, italic, underline, highlight and links, as ranges over a field's text.
  *
  * ## Why a sidecar, and not rich text
  *
@@ -35,6 +35,17 @@ export interface Mark {
   b?: true
   i?: true
   u?: true
+  /**
+   * Highlighted — set on the spread's swash colour.
+   *
+   * This is the same effect a statement's pink words have always had. It used
+   * to be `StatementBlock.highlights`, a list of *phrases* matched against the
+   * text at paint time, which meant editing a highlighted word silently lost
+   * its highlight and the same word twice in a sentence could only be marked
+   * once. As a range it is just another mark, maintained by `remapMarks` like
+   * every other, and available to any component rather than only a statement.
+   */
+  h?: true
   href?: string
 }
 
@@ -46,17 +57,21 @@ export interface Attrs {
   b?: true
   i?: true
   u?: true
+  h?: true
   href?: string
 }
 
-export type Flag = 'b' | 'i' | 'u'
+export type Flag = 'b' | 'i' | 'u' | 'h'
+
+/** Every flag, for the loops below that must not forget one. */
+const FLAGS: Flag[] = ['b', 'i', 'u', 'h']
 
 export const markKey = (path: (string | number)[]): string => path.join('.')
 
 const same = (a: Attrs, b: Attrs): boolean =>
-  !!a.b === !!b.b && !!a.i === !!b.i && !!a.u === !!b.u && a.href === b.href
+  FLAGS.every((k) => !!a[k] === !!b[k]) && a.href === b.href
 
-const empty = (a: Attrs): boolean => !a.b && !a.i && !a.u && a.href === undefined
+const empty = (a: Attrs): boolean => !FLAGS.some((k) => a[k]) && a.href === undefined
 
 /**
  * Spread marks over a per-character array, and gather them back up.
@@ -72,9 +87,7 @@ function explode(marks: Mark[], len: number): Attrs[] {
     const from = Math.max(0, Math.floor(m.from))
     const to = Math.min(len, Math.ceil(m.to))
     for (let i = from; i < to; i += 1) {
-      if (m.b) out[i].b = true
-      if (m.i) out[i].i = true
-      if (m.u) out[i].u = true
+      for (const k of FLAGS) if (m[k]) out[i][k] = true
       if (m.href !== undefined) out[i].href = m.href
     }
   }
@@ -109,16 +122,18 @@ export function activeAt(
   text: string,
   from: number,
   to: number,
-): { b: boolean; i: boolean; u: boolean; href: string | null } {
-  if (to <= from) return { b: false, i: false, u: false, href: null }
+): Record<Flag, boolean> & { href: string | null } {
+  const none = { b: false, i: false, u: false, h: false, href: null }
+  if (to <= from) return none
   const attrs = explode(marks, text.length).slice(from, to)
-  if (!attrs.length) return { b: false, i: false, u: false, href: null }
+  if (!attrs.length) return none
   const all = (k: Flag) => attrs.every((a) => a[k])
   const href = attrs[0].href
   return {
     b: all('b'),
     i: all('i'),
     u: all('u'),
+    h: all('h'),
     href: href !== undefined && attrs.every((a) => a.href === href) ? href : null,
   }
 }
@@ -253,4 +268,55 @@ export function withMarks(
   if (Object.keys(field).length) next[key] = field
   else delete next[key]
   return Object.keys(next).length ? next : undefined
+}
+
+/**
+ * Build highlight marks by finding phrases in a field's text.
+ *
+ * This is how `StatementBlock.highlights` used to work at *paint* time, kept
+ * here for the two callers that still need it: migration v9, which converts
+ * stored documents once, and the seeds in `doc/defaults.ts`, `templates/` and
+ * `doc/toolsForChange.ts`, which are authored as phrases because writing out
+ * offsets by hand would be unreadable and would rot the moment the copy
+ * changed.
+ *
+ * Nothing calls it while rendering. Once a document is loaded its highlights
+ * are ranges, and the whole point of the change is that they stay put when the
+ * words around them move.
+ *
+ * Matching is by literal phrase, in the order given, each used once, resolved
+ * per language — so the same block can highlight "21 organizers" in English and
+ * "21 organisateurs" in French. A phrase that isn't found is skipped rather
+ * than throwing: it was decoration, and losing one should not stop the page.
+ */
+export function phraseMarks(
+  value: LocalizedText,
+  phrases: string[],
+  key = 'text',
+): MarkMap | undefined {
+  let map: MarkMap | undefined
+  for (const lang of LANGS) {
+    const text = t(value, lang)
+    if (!text) continue
+    const marks: Mark[] = []
+    let at = 0
+    for (const phrase of phrases) {
+      if (!phrase) continue
+      const found = text.indexOf(phrase, at)
+      if (found < 0) continue
+      marks.push({ from: found, to: found + phrase.length, h: true })
+      at = found + phrase.length
+    }
+    if (marks.length) map = withMarks(map, key, lang, normalizeMarks(marks, text.length))
+  }
+  return map
+}
+
+/** Merge two mark maps, with `extra` winning where both name a field. */
+export const mergeMarks = (base: MarkMap | undefined, extra: MarkMap | undefined): MarkMap | undefined => {
+  if (!base) return extra
+  if (!extra) return base
+  const out: MarkMap = { ...base }
+  for (const [key, byLang] of Object.entries(extra)) out[key] = { ...out[key], ...byLang }
+  return out
 }

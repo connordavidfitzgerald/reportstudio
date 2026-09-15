@@ -45,6 +45,15 @@ export interface LeafOptions {
 
 export interface LeafResult {
   placed: PlacedBlock[]
+  /**
+   * Where this leaf's flow starts, in its own pixel space.
+   *
+   * Not derivable from `placed`: the first block may have been dragged down the
+   * page, in which case its rect is nowhere near the origin. The drag resolver
+   * needs the real one to know how far *up* a block may be dropped — see
+   * `placementAt`.
+   */
+  origin: number
   overflow: boolean
   /** Empty unless `regions` was asked for. */
   regions: TextRegion[]
@@ -118,10 +127,10 @@ function paintOverlays(env: LeafEnv): void {
 
 function paint(env: LeafEnv, regions: TextRegion[], links: LeafLink[]): LeafResult {
   paintSurface(env)
-  const { placed, overflow } = paintBlocks(env)
+  const { placed, origin, overflow } = paintBlocks(env)
   paintFurniture(env)
   paintOverlays(env)
-  return { placed, overflow, regions, links }
+  return { placed, origin, overflow, regions, links }
 }
 
 /** Run `paint`, with the collectors wired up for whatever was asked for. */

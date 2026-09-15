@@ -1,4 +1,4 @@
-import type { ImageRef } from './imageStore'
+import type { ImageRef } from './imageRef'
 
 /**
  * The photographs from the *Tools for Change* file.

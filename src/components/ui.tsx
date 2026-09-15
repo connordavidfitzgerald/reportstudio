@@ -32,7 +32,7 @@ const VARIANTS = {
     primary: "bg-ink text-card hover:bg-ink/90",
     default: "bg-control text-ink hover:bg-control/70",
     quiet: "bg-transparent text-dim hover:text-ink",
-    danger: "bg-control text-[#FF8FA3] hover:bg-[#FF8FA3] hover:text-card",
+    danger: "bg-control text-danger hover:bg-danger hover:text-card",
 } as const;
 
 export function Button({

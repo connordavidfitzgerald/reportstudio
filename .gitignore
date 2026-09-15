@@ -25,3 +25,8 @@ dist-ssr
 
 # spike output
 .spike
+
+# local env — `*.local` above already covers .env.local, but be explicit
+.env
+.env.*
+!.env.example

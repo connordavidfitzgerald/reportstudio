@@ -101,7 +101,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
             </div>
 
             {error && (
-                <p className="rounded-2xl bg-[#FF8FA3]/10 px-3 py-2 text-2xs text-[#FF8FA3]">
+                <p className="rounded-2xl bg-danger/10 px-3 py-2 text-2xs text-danger">
                     {error}
                 </p>
             )}

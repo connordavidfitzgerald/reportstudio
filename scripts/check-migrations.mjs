@@ -91,6 +91,107 @@ for (let v = 6; v <= CURRENT_VERSION; v++) {
   )
 }
 
+// -- v8 → v9: highlights become marks, and indent inverts ------------------
+// Both halves are default *inversions*, which is the one kind of change that
+// cannot be left to the reader: a document written under the old default and
+// painted under the new one is silently a different document.
+{
+  const v8 = (blocks) =>
+    migrate({
+      ...payload(),
+      v: 8,
+      deck: { lang: 'en', leaves: [{ ...leaf, blocks }], startFolio: 1, overlayOpacity: {} },
+    }).deck.leaves[0].blocks
+
+  // Phrases resolve to the offsets the painter was already drawing at.
+  {
+    const text = 'Le HUB spoke with 21 organizers across 6 provinces.'
+    const [b] = v8([
+      { id: 'bk_s', kind: 'statement', text, highlights: ['21 organizers', '6 provinces'] },
+    ])
+    assert.equal(b.highlights, undefined, 'the old field is gone, not merely shadowed')
+    const marks = b.marks.text.en
+    assert.equal(marks.length, 2, 'one mark per phrase that was found')
+    for (const m of marks) assert.equal(m.h, true, 'and they are highlights')
+    assert.equal(text.slice(marks[0].from, marks[0].to), '21 organizers')
+    assert.equal(text.slice(marks[1].from, marks[1].to), '6 provinces')
+  }
+
+  // A phrase that no longer occurs was already not being painted. It is
+  // dropped rather than carried as a mark that could never appear.
+  {
+    const [b] = v8([
+      { id: 'bk_s', kind: 'statement', text: 'Nothing matches here.', highlights: ['21 organizers'] },
+    ])
+    assert.equal(b.marks, undefined, 'an unmatched phrase leaves no mark behind')
+  }
+
+  // The same word twice: the second phrase matches *after* the first, which is
+  // the rule the old painter used as it consumed the string left to right.
+  {
+    const text = 'six and six'
+    const [b] = v8([{ id: 'bk_s', kind: 'statement', text, highlights: ['six', 'six'] }])
+    const marks = b.marks.text.en
+    assert.deepEqual(
+      marks.map((m) => [m.from, m.to]),
+      [[0, 3], [8, 11]],
+      'each phrase is used once, in order',
+    )
+  }
+
+  // Indent: absent used to mean indented, so absent must become explicit.
+  {
+    const [a, b, c] = v8([
+      { id: 'bk_a', kind: 'para', text: 'Relying on the old default.' },
+      { id: 'bk_b', kind: 'para', text: 'Deliberately flush.', indent: false },
+      { id: 'bk_c', kind: 'para', text: 'Deliberately indented.', indent: true },
+    ])
+    assert.equal(a.indent, true, 'a paragraph that was indented by default still is')
+    assert.equal(b.indent, false, 'an explicitly flush paragraph is left alone')
+    assert.equal(c.indent, true, 'an explicitly indented one is left alone')
+  }
+
+  // A new paragraph, made now, is flush — that is the point of the inversion.
+  {
+    const [fresh] = migrate(payload()).deck.leaves[0].blocks
+    assert.equal(fresh.indent, undefined, 'v9 payloads are not rewritten on read')
+  }
+}
+
+// -- v9 → v10: gapBefore is dropped ----------------------------------------
+// It is not converted, and the check is that it is *gone* rather than carried
+// as a field the compositor no longer reads — a stale `gapBefore` sitting in a
+// saved document would be invisible until someone wrote code that trusted it.
+{
+  const v9 = (blocks) =>
+    migrate({
+      ...payload(),
+      v: 9,
+      deck: { lang: 'en', leaves: [{ ...leaf, blocks }], startFolio: 1, overlayOpacity: {} },
+    }).deck.leaves[0].blocks
+
+  const [a, b] = v9([
+    { id: 'bk_a', kind: 'para', text: 'Dragged down the page.', gapBefore: 30 },
+    { id: 'bk_b', kind: 'para', text: 'Never touched.' },
+  ])
+  assert.equal(a.gapBefore, undefined, 'the old field is gone, not merely shadowed')
+  assert.equal(a.top, undefined, 'and is not guessed at as a top edge')
+  assert.equal(a.text, 'Dragged down the page.', 'the block is otherwise untouched')
+  assert.equal(b.text, 'Never touched.', 'a block that never had one is left alone')
+
+  // A top written by the current editor is not a thing to migrate.
+  const [kept] = migrate({
+    ...payload(),
+    deck: {
+      lang: 'en',
+      leaves: [{ ...leaf, blocks: [{ id: 'bk_t', kind: 'para', text: 'Placed.', top: 288 }] }],
+      startFolio: 1,
+      overlayOpacity: {},
+    },
+  }).deck.leaves[0].blocks
+  assert.equal(kept.top, 288, 'v10 payloads are not rewritten on read')
+}
+
 // -- junk is declined ------------------------------------------------------
 assert.equal(migrate({}), null, 'a payload with no version is declined')
 assert.equal(migrate({ v: CURRENT_VERSION }), null, 'a payload with no deck is declined')
